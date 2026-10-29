@@ -2,7 +2,6 @@ using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -53,6 +52,7 @@ namespace MD301Plus
         private readonly ContextMenuStrip trayMenu;
         private readonly ToolStripMenuItem resumeMenu;
         private readonly System.Windows.Forms.Timer executionTimer;
+        private readonly SettingsRequestWindow settingsRequests;
         private readonly Stopwatch wait = new Stopwatch();
         private RingSettings settings;
         private SettingsForm editor;
@@ -61,13 +61,15 @@ namespace MD301Plus
         private IntPtr pendingTarget;
         private bool disposed;
         internal TriggerBinding ActiveBinding { get { return registration == null ? null : registration.Binding; } }
+        internal bool IsSettingsOpen { get { return editor != null && !editor.IsDisposed && editor.Visible; } }
 
         internal RingApplication(bool openSettings, bool openPreview)
-            : this(openSettings, openPreview, new SettingsStore(Path.Combine(AppLog.DirectoryPath, "settings.json")))
+            : this(openSettings, openPreview, new SettingsStore(Path.Combine(AppLog.DirectoryPath, "settings.json")),
+                SettingsRequestWindow.DefaultName)
         {
         }
 
-        internal RingApplication(bool openSettings, bool openPreview, SettingsStore store)
+        internal RingApplication(bool openSettings, bool openPreview, SettingsStore store, string settingsRequestName)
         {
             this.store = store;
             bool firstRun = !File.Exists(store.FilePath);
@@ -76,11 +78,11 @@ namespace MD301Plus
             Win32Exception registrationError = null;
             try { registration = new TriggerRegistration(TriggerBinding.Parse(settings.Trigger), ToggleRing); }
             catch (Win32Exception ex) { registrationError = ex; }
-            ring = new RingForm();
+            icon = CreateIcon();
+            ring = new RingForm { Icon = icon };
             ring.ActionChosen += ChooseAction;
             executionTimer = new System.Windows.Forms.Timer { Interval = 20 };
             executionTimer.Tick += ExecutePending;
-            icon = CreateIcon();
             trayMenu = new ContextMenuStrip();
             trayMenu.Items.Add("Settings...", null, delegate { ShowSettings(); });
             trayMenu.Items.Add("Preview ring", null, delegate { ShowPreview(settings); });
@@ -100,6 +102,7 @@ namespace MD301Plus
                 ContextMenuStrip = trayMenu, Visible = true
             };
             tray.DoubleClick += delegate { ShowSettings(); };
+            settingsRequests = new SettingsRequestWindow(settingsRequestName, ShowSettings);
             if (firstRun || openSettings || registrationError != null) ShowSettings();
             if (registrationError != null) AppLog.ShowError(editor, "Trigger unavailable", registrationError);
             if (openPreview) ShowPreview(settings);
@@ -141,6 +144,7 @@ namespace MD301Plus
             if (editor == null || editor.IsDisposed)
             {
                 editor = new SettingsForm(settings, ApplySettings, ShowPreview, PauseTriggerForSetup, ResumeSavedTrigger, resumeMenu.Enabled);
+                editor.Icon = icon;
                 editor.FormClosed += delegate { editor = null; ring.CloseMenu(); };
                 editor.Show();
             }
@@ -274,35 +278,13 @@ namespace MD301Plus
                 message.Length > 250 ? message.Substring(0, 247) + "..." : message, type);
         }
 
-        private static Icon CreateIcon()
+        internal static Icon CreateIcon()
         {
-            using (Bitmap bitmap = new Bitmap(32, 32))
+            using (Stream stream = typeof(RingApplication).Assembly.GetManifestResourceStream("MD301Plus.AppIcon"))
             {
-                using (Graphics graphics = Graphics.FromImage(bitmap))
-                using (SolidBrush background = new SolidBrush(Theme.Background))
-                using (SolidBrush accent = new SolidBrush(Theme.Accent))
-                {
-                    graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                    graphics.FillEllipse(background, 0, 0, 31, 31);
-                    for (int i = 0; i < 8; i++)
-                    {
-                        double angle = (i * 45 - 90) * Math.PI / 180;
-                        graphics.FillEllipse(accent, 14 + (float)Math.Cos(angle) * 10,
-                            14 + (float)Math.Sin(angle) * 10, 4, 4);
-                    }
-                    graphics.FillEllipse(accent, 13, 13, 6, 6);
-                }
-                IntPtr handle = bitmap.GetHicon();
-                try
-                {
-                    using (Icon borrowed = Icon.FromHandle(handle))
-                        return (Icon)borrowed.Clone();
-                }
-                finally
-                {
-                    if (!Native.DestroyIcon(handle))
-                        AppLog.Error("Releasing a temporary tray icon", new Win32Exception(Marshal.GetLastWin32Error()));
-                }
+                if (stream == null) throw new IOException("The embedded application icon is missing.");
+                using (Icon embedded = new Icon(stream, SystemInformation.SmallIconSize))
+                    return (Icon)embedded.Clone();
             }
         }
 
@@ -311,6 +293,7 @@ namespace MD301Plus
             if (disposing && !disposed)
             {
                 disposed = true;
+                settingsRequests.Dispose();
                 executionTimer.Dispose();
                 if (editor != null) editor.Dispose();
                 ring.Dispose();
@@ -347,8 +330,9 @@ namespace MD301Plus
             {
                 if (!created)
                 {
-                    MessageBox.Show("MD301 Plus is already running. Right-click its ring icon in the notification area to open Settings.",
-                        "MD301 Plus");
+                    if (!RequestSettingsFromRunningInstance())
+                        MessageBox.Show("MD301 Plus is already running. Right-click its mouse icon in the notification area to open Settings.",
+                            "MD301 Plus");
                     return 0;
                 }
                 try
@@ -363,6 +347,17 @@ namespace MD301Plus
                 catch (ExternalException ex) { AppLog.ShowError(null, "Cannot start", ex); return 1; }
                 finally { mutex.ReleaseMutex(); }
             }
+        }
+
+        private static bool RequestSettingsFromRunningInstance()
+        {
+            // The running instance may still be starting (for example at sign-in), so retry briefly.
+            for (int attempt = 0; attempt < 20; attempt++)
+            {
+                if (SettingsRequestWindow.Send(SettingsRequestWindow.DefaultName)) return true;
+                Thread.Sleep(100);
+            }
+            return false;
         }
     }
 }

@@ -71,6 +71,7 @@ namespace MD301Plus.Tests
             try
             {
                 TestShortcuts();
+                TestApplicationIcon();
                 TestSettings(directory);
                 TestMouseBindings();
                 TestMediaKeys();
@@ -106,6 +107,20 @@ namespace MD301Plus.Tests
         {
             assertions++;
             if (!value) throw new TestFailure(message);
+        }
+
+        private static void TestApplicationIcon()
+        {
+            using (Icon icon = RingApplication.CreateIcon())
+            using (Bitmap bitmap = icon.ToBitmap())
+            {
+                Check(icon.Size == SystemInformation.SmallIconSize, "Tray icon uses the system small-icon size.");
+                Check(bitmap.GetPixel(0, 0).A == 0, "Mouse icon has a transparent background.");
+                Check(bitmap.GetPixel(bitmap.Width / 2, bitmap.Height / 2).A > 0, "Mouse icon contains visible artwork.");
+            }
+            using (Icon executable = Icon.ExtractAssociatedIcon(Application.ExecutablePath))
+            using (Bitmap bitmap = executable.ToBitmap())
+                Check(bitmap.GetPixel(0, 0).A == 0, "Executable embeds the transparent mouse icon.");
         }
 
         private static void Throws<T>(Action action, string message) where T : Exception
@@ -801,10 +816,12 @@ namespace MD301Plus.Tests
             KeyboardShortcut oldTrigger = KeyboardShortcut.Parse(original.Trigger, true);
             KeyboardShortcut nextTrigger = KeyboardShortcut.Parse("Ctrl+Alt+Shift+F22", true);
             KeyboardShortcut failedTrigger = KeyboardShortcut.Parse("Ctrl+Alt+Shift+F21", true);
-            using (RingApplication application = new RingApplication(false, false, store))
+            string requestName = "MD301Plus.SettingsRequest.Test." + Guid.NewGuid().ToString("N");
+            using (RingApplication application = new RingApplication(false, false, store, requestName))
             using (HotkeyWindow probe = new HotkeyWindow())
             {
                 Application.DoEvents();
+                Check(!application.IsSettingsOpen, "A normal tray start keeps Settings closed");
                 Throws<Win32Exception>(delegate { probe.Register(oldTrigger); }, "Tray application owns its configured trigger");
                 application.PauseTriggerForSetup();
                 Check(application.ActiveBinding == null, "Pause the trigger while recording the DPI key in Gear Link");
@@ -857,14 +874,18 @@ namespace MD301Plus.Tests
                 application.ApplySettings(draft);
                 Check(store.Load().Trigger == "None" && !application.ActiveBinding.IsAssigned,
                     "Disabling assignment releases the mouse binding and persists the disabled state");
+                Check(SettingsRequestWindow.Send(requestName), "Starting the app again reaches the running instance");
+                PumpUntil(delegate { return application.IsSettingsOpen; },
+                    "Starting the app again opens Settings in the running instance");
                 application.Dispose();
+                Check(!SettingsRequestWindow.Send(requestName), "Shutdown removes the running-instance request window");
                 application.Dispose();
             }
             using (HotkeyWindow afterDispose = new HotkeyWindow())
                 afterDispose.Register(nextTrigger);
-            using (RingApplication unassigned = new RingApplication(false, false, store))
+            using (RingApplication unassigned = new RingApplication(false, false, store, requestName))
                 Check(!unassigned.ActiveBinding.IsAssigned, "Starting without an assignment claims no button or hotkey");
-            Console.WriteLine("PASS: tray lifecycle, keyboard/mouse/disabled transitions, binding rollback and idempotent shutdown");
+            Console.WriteLine("PASS: tray lifecycle, second-launch Settings handoff, keyboard/mouse/disabled transitions, binding rollback and idempotent shutdown");
         }
 
         private static void PumpUntil(Func<bool> done, string message)

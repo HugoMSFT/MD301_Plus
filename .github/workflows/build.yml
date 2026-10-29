@@ -1,0 +1,78 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, test and package
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        # Windows PowerShell 5.1 provides the .NET Framework C# compiler used by build.ps1.
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Inno Setup 6.5.2 or later
+        run: |
+          $found = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe", "$env:ProgramFiles\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue |
+            ForEach-Object { New-Object Version $_.VersionInfo.FileMajorPart, $_.VersionInfo.FileMinorPart, $_.VersionInfo.FileBuildPart } |
+            Sort-Object -Descending | Select-Object -First 1
+          if ($found -and $found -ge [Version]'6.5.2') {
+            Write-Output "Using Inno Setup $found"
+          } else {
+            choco upgrade innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Installing Inno Setup failed.' }
+          }
+
+      - name: Build, run unit tests and build the installer
+        run: .\build.ps1 -Test -Installer
+
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path bin\MD301Plus.exe).ProviderPath).ProductVersion
+          if ("v$version" -ne $env:GITHUB_REF_NAME) {
+            throw "Tag $env:GITHUB_REF_NAME does not match version $version in src\AssemblyInfo.cs."
+          }
+
+      - name: Test the installer
+        run: .\tests\Installer.Tests.ps1 -Setup bin\MD301Plus-Setup.exe
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: MD301Plus-Setup
+          path: bin/MD301Plus-Setup.exe
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: MD301Plus-Setup
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" MD301Plus-Setup.exe
+          --repo "$GITHUB_REPOSITORY"
+          --title "MD301 Plus $GITHUB_REF_NAME"
+          --notes "Download MD301Plus-Setup.exe below and run it. The installer is not code-signed yet, so Windows may show a SmartScreen warning: select More info, then Run anyway."
+          --generate-notes
+          --verify-tag
