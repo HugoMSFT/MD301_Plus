@@ -15,6 +15,10 @@ jobs:
     name: Build, test and package
     runs-on: windows-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
     defaults:
       run:
         # Windows PowerShell 5.1 provides the .NET Framework C# compiler used by build.ps1.
@@ -45,13 +49,36 @@ jobs:
             throw "Tag $env:GITHUB_REF_NAME does not match version $version in src\AssemblyInfo.cs."
           }
 
+      - name: Package portable app and SHA-256 checksums
+        run: |
+          Compress-Archive -Path bin\MD301Plus.exe, bin\MD301Plus.exe.config -DestinationPath bin\MD301Plus-Portable.zip -CompressionLevel Optimal
+          $assets = @('bin\MD301Plus-Setup.exe', 'bin\MD301Plus-Portable.zip')
+          $checksums = foreach ($asset in $assets) {
+            $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+            '{0}  {1}' -f $hash, (Split-Path -Leaf $asset)
+          }
+          $checksumFile = Join-Path $PWD 'bin\MD301Plus-SHA256.txt'
+          [System.IO.File]::WriteAllLines($checksumFile, $checksums, [System.Text.Encoding]::ASCII)
+          Get-Content -LiteralPath $checksumFile
+
       - name: Test the installer
         run: .\tests\Installer.Tests.ps1 -Setup bin\MD301Plus-Setup.exe
 
+      - name: Attest build provenance
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            bin/MD301Plus-Setup.exe
+            bin/MD301Plus-Portable.zip
+
       - uses: actions/upload-artifact@v7
         with:
-          name: MD301Plus-Setup
-          path: bin/MD301Plus-Setup.exe
+          name: MD301Plus-Release
+          path: |
+            bin/MD301Plus-Setup.exe
+            bin/MD301Plus-Portable.zip
+            bin/MD301Plus-SHA256.txt
           if-no-files-found: error
 
   release:
@@ -64,15 +91,21 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: MD301Plus-Setup
+          name: MD301Plus-Release
+
+      - name: Verify release artifact provenance
+        run: |
+          gh attestation verify MD301Plus-Setup.exe --repo "$GITHUB_REPOSITORY"
+          gh attestation verify MD301Plus-Portable.zip --repo "$GITHUB_REPOSITORY"
 
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "$GITHUB_REF_NAME" MD301Plus-Setup.exe
+          MD301Plus-Portable.zip MD301Plus-SHA256.txt
           --repo "$GITHUB_REPOSITORY"
           --title "MD301 Plus $GITHUB_REF_NAME"
-          --notes "Download MD301Plus-Setup.exe below and run it. The installer is not code-signed yet, so Windows may show a SmartScreen warning: select More info, then Run anyway."
+          --notes "Download either the installer or portable ZIP below. Both are built and tested by GitHub Actions; SHA-256 checksums are attached. Windows may still show a SmartScreen warning because the files are not code-signed and are new or uncommon downloads."
           --generate-notes
           --verify-tag

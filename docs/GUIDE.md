@@ -396,6 +396,25 @@ copy. Because it changes your user profile, it refuses to run while MD301 Plus
 is installed or running. GitHub Actions runs it, with the unit tests, for every
 pull request.
 
+### Portable download and verification
+
+Each release includes `MD301Plus-Portable.zip`, which contains the app and its
+configuration file. Extract it and double-click `MD301Plus.exe`; it runs in the
+notification area until you exit it. Its settings are stored under your local
+app-data folder, separately from the portable files.
+
+The release also includes `MD301Plus-SHA256.txt`. To check a downloaded ZIP in
+PowerShell, run `Get-FileHash .\MD301Plus-Portable.zip -Algorithm SHA256` and
+compare the hash with the matching line in that file. GitHub build provenance
+can also be checked with `gh attestation verify .\MD301Plus-Portable.zip
+--repo HugoMSFT/MD301_Plus`. These checks show that the download matches the
+published file and was built by the repository's GitHub Actions workflow; they
+do not certify that software is free of bugs or prevent SmartScreen warnings.
+
+The app and installer are not code-signed. Signing requires a paid certificate
+or service, so releases remain unsigned; SmartScreen may warn about unfamiliar
+or uncommon downloads.
+
 To publish a release:
 
 1. In `src\AssemblyInfo.cs`, update all three version numbers, for example to
@@ -404,6 +423,7 @@ To publish a release:
 3. Tag that commit with the matching version and push the tag:
    `git tag v1.0.1` and then `git push origin v1.0.1`.
 
-The workflow builds and tests the installer, then publishes a GitHub release with
-`MD301Plus-Setup.exe` attached. The README download link always points to the
+The workflow builds and tests the app and installer, creates the portable ZIP
+and checksums, and attests the release files' build provenance. It publishes the
+installer, portable ZIP, and checksum file. README download links point to the
 latest release.
