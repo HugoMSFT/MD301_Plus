@@ -127,6 +127,16 @@ namespace MD301Plus
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool DestroyIcon(IntPtr icon);
 
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        internal static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string windowName);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        internal static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool AllowSetForegroundWindow(uint processId);
+
         internal static float DpiScale(Point point)
         {
             uint x, y;
@@ -336,6 +346,45 @@ namespace MD301Plus
                     AppLog.Error("Releasing a keyboard trigger", new Win32Exception(Marshal.GetLastWin32Error()));
             registrations.Clear();
             DestroyHandle();
+        }
+    }
+
+    // Lets a second launch (for example from the Start menu) open Settings in the running instance.
+    internal sealed class SettingsRequestWindow : NativeWindow, IDisposable
+    {
+        internal const string DefaultName = "MD301Plus.SettingsRequest";
+        private const int RequestMessage = 0x8001;
+        private readonly Action requested;
+
+        internal SettingsRequestWindow(string name, Action requested)
+        {
+            this.requested = requested;
+            CreateHandle(new CreateParams { Caption = name, Parent = new IntPtr(-3) });
+        }
+
+        internal static bool Send(string name)
+        {
+            IntPtr window = Native.FindWindowEx(new IntPtr(-3), IntPtr.Zero, null, name);
+            if (window == IntPtr.Zero) return false;
+            uint process;
+            // The launching process may pass its foreground permission so Settings appears in front.
+            if (Native.GetWindowThreadProcessId(window, out process) != 0) Native.AllowSetForegroundWindow(process);
+            return Native.PostMessage(window, RequestMessage, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == RequestMessage)
+            {
+                requested();
+                return;
+            }
+            base.WndProc(ref message);
+        }
+
+        public void Dispose()
+        {
+            if (Handle != IntPtr.Zero) DestroyHandle();
         }
     }
 

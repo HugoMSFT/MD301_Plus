@@ -52,6 +52,7 @@ namespace MD301Plus
         private readonly ContextMenuStrip trayMenu;
         private readonly ToolStripMenuItem resumeMenu;
         private readonly System.Windows.Forms.Timer executionTimer;
+        private readonly SettingsRequestWindow settingsRequests;
         private readonly Stopwatch wait = new Stopwatch();
         private RingSettings settings;
         private SettingsForm editor;
@@ -60,13 +61,15 @@ namespace MD301Plus
         private IntPtr pendingTarget;
         private bool disposed;
         internal TriggerBinding ActiveBinding { get { return registration == null ? null : registration.Binding; } }
+        internal bool IsSettingsOpen { get { return editor != null && !editor.IsDisposed && editor.Visible; } }
 
         internal RingApplication(bool openSettings, bool openPreview)
-            : this(openSettings, openPreview, new SettingsStore(Path.Combine(AppLog.DirectoryPath, "settings.json")))
+            : this(openSettings, openPreview, new SettingsStore(Path.Combine(AppLog.DirectoryPath, "settings.json")),
+                SettingsRequestWindow.DefaultName)
         {
         }
 
-        internal RingApplication(bool openSettings, bool openPreview, SettingsStore store)
+        internal RingApplication(bool openSettings, bool openPreview, SettingsStore store, string settingsRequestName)
         {
             this.store = store;
             bool firstRun = !File.Exists(store.FilePath);
@@ -99,6 +102,7 @@ namespace MD301Plus
                 ContextMenuStrip = trayMenu, Visible = true
             };
             tray.DoubleClick += delegate { ShowSettings(); };
+            settingsRequests = new SettingsRequestWindow(settingsRequestName, ShowSettings);
             if (firstRun || openSettings || registrationError != null) ShowSettings();
             if (registrationError != null) AppLog.ShowError(editor, "Trigger unavailable", registrationError);
             if (openPreview) ShowPreview(settings);
@@ -289,6 +293,7 @@ namespace MD301Plus
             if (disposing && !disposed)
             {
                 disposed = true;
+                settingsRequests.Dispose();
                 executionTimer.Dispose();
                 if (editor != null) editor.Dispose();
                 ring.Dispose();
@@ -325,8 +330,9 @@ namespace MD301Plus
             {
                 if (!created)
                 {
-                    MessageBox.Show("MD301 Plus is already running. Right-click its mouse icon in the notification area to open Settings.",
-                        "MD301 Plus");
+                    if (!RequestSettingsFromRunningInstance())
+                        MessageBox.Show("MD301 Plus is already running. Right-click its mouse icon in the notification area to open Settings.",
+                            "MD301 Plus");
                     return 0;
                 }
                 try
@@ -341,6 +347,17 @@ namespace MD301Plus
                 catch (ExternalException ex) { AppLog.ShowError(null, "Cannot start", ex); return 1; }
                 finally { mutex.ReleaseMutex(); }
             }
+        }
+
+        private static bool RequestSettingsFromRunningInstance()
+        {
+            // The running instance may still be starting (for example at sign-in), so retry briefly.
+            for (int attempt = 0; attempt < 20; attempt++)
+            {
+                if (SettingsRequestWindow.Send(SettingsRequestWindow.DefaultName)) return true;
+                Thread.Sleep(100);
+            }
+            return false;
         }
     }
 }
