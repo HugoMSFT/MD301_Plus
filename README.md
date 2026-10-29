@@ -7,12 +7,19 @@ the pointer. Click one to run it.
 
 ## Install
 
-1. **[Download MD301Plus-Setup.exe](https://github.com/HugoMSFT/MD301_Plus/releases/latest/download/MD301Plus-Setup.exe)**
-2. Run it. If Windows shows a SmartScreen warning, select **More info**, then
-   **Run anyway**. The installer is not code-signed yet.
-3. When setup finishes, MD301 Plus opens its settings.
+**Install normally:** [Download MD301Plus-Setup.exe](https://github.com/HugoMSFT/MD301_Plus/releases/latest/download/MD301Plus-Setup.exe)
+and run it. No administrator rights are needed.
+
+**Run without installing:** [Download MD301Plus-Portable.zip](https://github.com/HugoMSFT/MD301_Plus/releases/latest/download/MD301Plus-Portable.zip),
+extract it, then double-click `MD301Plus.exe`. It stays in the notification
+area while it is running.
 
 Works on Windows 10 and 11. You don't need administrator rights.
+
+GitHub Actions builds and tests each release. The release includes SHA-256
+checksums and GitHub build provenance so you can verify the files came from this
+repository. The app is not code-signed, so Windows may still show a SmartScreen
+warning for a new or uncommon download.
 
 ## Use
 
