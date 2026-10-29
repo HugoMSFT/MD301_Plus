@@ -418,10 +418,10 @@ or uncommon downloads.
 To publish a release:
 
 1. In `src\AssemblyInfo.cs`, update all three version numbers, for example to
-   `1.0.1.0`, `1.0.1.0`, and `1.0.1`.
+   `1.0.2.0`, `1.0.2.0`, and `1.0.2`.
 2. Merge the change to `main`.
 3. Tag that commit with the matching version and push the tag:
-   `git tag v1.0.1` and then `git push origin v1.0.1`.
+   `git tag v1.0.2` and then `git push origin v1.0.2`.
 
 The workflow builds and tests the app and installer, creates the portable ZIP
 and checksums, and attests the release files' build provenance. It publishes the
