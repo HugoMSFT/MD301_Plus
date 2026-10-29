@@ -88,10 +88,18 @@ From Windows PowerShell in this checkout:
 .\bin\MD301Plus.exe
 ```
 
+To add **MD301 Plus** to the current user's Start Menu with its mouse icon,
+build with `.\build.ps1 -InstallStartMenuShortcut`. The shortcut opens Settings.
+
 The compiler shipped with Windows .NET Framework produces a portable AnyCPU
 application. Keep `MD301Plus.exe` and `MD301Plus.exe.config` together.
+The build generates and embeds a multi-resolution mouse icon (16-256 pixels):
+a minimal graphite MD301-inspired silhouette with its asymmetric thumb rest,
+light outline, and brass scroll wheel. The executable, Settings window,
+and notification-area icon share this artwork; no external icon file is needed
+at runtime. Its source artwork is in `tools\New-AppIcon.ps1`.
 First launch opens Settings; afterward the app lives in the notification area.
-Double-click its ring icon, or right-click it and choose **Settings...**.
+Double-click its mouse icon, or right-click it and choose **Settings...**.
 The notification icon may be in Windows's hidden-icons overflow.
 
 ```powershell

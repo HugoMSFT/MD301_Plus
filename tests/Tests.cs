@@ -71,6 +71,7 @@ namespace MD301Plus.Tests
             try
             {
                 TestShortcuts();
+                TestApplicationIcon();
                 TestSettings(directory);
                 TestMouseBindings();
                 TestMediaKeys();
@@ -106,6 +107,20 @@ namespace MD301Plus.Tests
         {
             assertions++;
             if (!value) throw new TestFailure(message);
+        }
+
+        private static void TestApplicationIcon()
+        {
+            using (Icon icon = RingApplication.CreateIcon())
+            using (Bitmap bitmap = icon.ToBitmap())
+            {
+                Check(icon.Size == SystemInformation.SmallIconSize, "Tray icon uses the system small-icon size.");
+                Check(bitmap.GetPixel(0, 0).A == 0, "Mouse icon has a transparent background.");
+                Check(bitmap.GetPixel(bitmap.Width / 2, bitmap.Height / 2).A > 0, "Mouse icon contains visible artwork.");
+            }
+            using (Icon executable = Icon.ExtractAssociatedIcon(Application.ExecutablePath))
+            using (Bitmap bitmap = executable.ToBitmap())
+                Check(bitmap.GetPixel(0, 0).A == 0, "Executable embeds the transparent mouse icon.");
         }
 
         private static void Throws<T>(Action action, string message) where T : Exception

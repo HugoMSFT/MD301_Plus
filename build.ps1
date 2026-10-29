@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [switch]$Test,
+    [switch]$InstallStartMenuShortcut,
     [string]$OutputDirectory = 'bin'
 )
 
@@ -17,11 +18,15 @@ $output = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
     Join-Path $PSScriptRoot $OutputDirectory
 }
 New-Item -ItemType Directory -Path $output -Force | Out-Null
+& (Join-Path $PSScriptRoot 'tools\New-AppIcon.ps1') -OutputDirectory $output
+$appIcon = Join-Path $output 'MD301Plus.ico'
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Filter '*.cs' |
     Sort-Object Name | ForEach-Object { $_.FullName })
 $references = @('System.dll', 'System.Core.dll', 'System.Drawing.dll',
     'System.Windows.Forms.dll', 'System.Runtime.Serialization.dll', 'Accessibility.dll')
 $common = @('/nologo', '/warn:4', '/warnaserror+', '/optimize+', '/checked+', '/platform:anycpu')
+$common += '/win32icon:' + $appIcon
+$common += '/resource:' + $appIcon + ',MD301Plus.AppIcon'
 foreach ($reference in $references) {
     $common += '/reference:' + (Join-Path $runtime $reference)
 }
@@ -34,6 +39,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'src\MD301Plus.exe.config') -Destination ($app + '.config')
 Write-Output "Built $app"
+if ($InstallStartMenuShortcut) {
+    & (Join-Path $PSScriptRoot 'tools\Install-StartMenuShortcut.ps1') -Executable $app
+}
 
 if ($Test) {
     $testExe = Join-Path $output 'MD301Plus.Tests.exe'
