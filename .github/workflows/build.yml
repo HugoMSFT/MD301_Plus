@@ -94,6 +94,8 @@ jobs:
           name: MD301Plus-Release
 
       - name: Verify release artifact provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh attestation verify MD301Plus-Setup.exe --repo "$GITHUB_REPOSITORY"
           gh attestation verify MD301Plus-Portable.zip --repo "$GITHUB_REPOSITORY"
