@@ -18,8 +18,13 @@ Works on Windows 10 and 11. You don't need administrator rights.
 
 GitHub Actions builds and tests each release. The release includes SHA-256
 checksums and GitHub build provenance so you can verify the files came from this
-repository. The app is not code-signed, so Windows may still show a SmartScreen
-warning for a new or uncommon download.
+repository. The app is not code-signed yet, so Windows may still warn about it:
+
+- **"Windows protected your PC" (SmartScreen):** select **More info**, then
+  **Run anyway**.
+- **"Smart App Control blocked an app":** Windows 11 can't allow just one app.
+  You can turn Smart App Control off, which lowers protection for every app, or
+  wait for a signed version. [What to do](docs/GUIDE.md#smart-app-control-blocked-md301-plus)
 
 ## Use
 
