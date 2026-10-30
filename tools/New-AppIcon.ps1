@@ -1,13 +1,14 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [string]$PackageAssetDirectory
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
-$frames = @()
-foreach ($size in @(16, 20, 24, 32, 48, 64, 128, 256)) {
+
+function New-IconBitmap([int]$size) {
     $canvas = New-Object System.Drawing.Bitmap ($size * 4), ($size * 4)
     $graphics = [System.Drawing.Graphics]::FromImage($canvas)
     $body = New-Object System.Drawing.Drawing2D.GraphicsPath
@@ -20,7 +21,6 @@ foreach ($size in @(16, 20, 24, 32, 48, 64, 128, 256)) {
     $brass = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(231, 190, 113))
     $bitmap = New-Object System.Drawing.Bitmap $size, $size
     $scaled = [System.Drawing.Graphics]::FromImage($bitmap)
-    $stream = New-Object System.IO.MemoryStream
     try {
         $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
         $graphics.ScaleTransform(($size * 4 / 256.0), ($size * 4 / 256.0))
@@ -41,6 +41,28 @@ foreach ($size in @(16, 20, 24, 32, 48, 64, 128, 256)) {
         $graphics.FillEllipse($brass, 131, 40, 16, 36)
         $scaled.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
         $scaled.DrawImage($canvas, 0, 0, $size, $size)
+    } catch {
+        $bitmap.Dispose()
+        throw
+    } finally {
+        $scaled.Dispose()
+        $brass.Dispose()
+        $seam.Dispose()
+        $edge.Dispose()
+        $shell.Dispose()
+        $body.Dispose()
+        $graphics.Dispose()
+        $canvas.Dispose()
+    }
+    return $bitmap
+}
+
+$sizes = @(16, 20, 24, 32, 48, 64, 128, 256)
+$frames = @()
+foreach ($size in $sizes) {
+    $bitmap = New-IconBitmap $size
+    $stream = New-Object System.IO.MemoryStream
+    try {
         # DIB frames also work with .NET Framework's Icon.ToBitmap (PNG frames do not).
         if ($size -eq 256) {
             $bitmap.Save((Join-Path $OutputDirectory 'icon-preview.png'), [System.Drawing.Imaging.ImageFormat]::Png)
@@ -54,15 +76,7 @@ foreach ($size in @(16, 20, 24, 32, 48, 64, 128, 256)) {
         $frames += ,$frame
     } finally {
         $stream.Dispose()
-        $scaled.Dispose()
         $bitmap.Dispose()
-        $brass.Dispose()
-        $seam.Dispose()
-        $edge.Dispose()
-        $shell.Dispose()
-        $body.Dispose()
-        $graphics.Dispose()
-        $canvas.Dispose()
     }
 }
 
@@ -73,7 +87,6 @@ try {
     $writer.Write([uint16]1)
     $writer.Write([uint16]$frames.Count)
     $offset = 6 + 16 * $frames.Count
-    $sizes = @(16, 20, 24, 32, 48, 64, 128, 256)
     for ($i = 0; $i -lt $frames.Count; $i++) {
         $dimension = if ($sizes[$i] -eq 256) { 0 } else { $sizes[$i] }
         $writer.Write([byte]$dimension)
@@ -88,4 +101,17 @@ try {
     foreach ($frame in $frames) { $writer.Write([byte[]]$frame) }
 } finally {
     $writer.Dispose()
+}
+
+if ($PackageAssetDirectory) {
+    New-Item -ItemType Directory -Path $PackageAssetDirectory -Force | Out-Null
+    $logos = [ordered]@{ 'Square44x44Logo.png' = 44; 'StoreLogo.png' = 50; 'Square150x150Logo.png' = 150 }
+    foreach ($logo in $logos.GetEnumerator()) {
+        $bitmap = New-IconBitmap $logo.Value
+        try {
+            $bitmap.Save((Join-Path $PackageAssetDirectory $logo.Key), [System.Drawing.Imaging.ImageFormat]::Png)
+        } finally {
+            $bitmap.Dispose()
+        }
+    }
 }

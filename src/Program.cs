@@ -248,7 +248,7 @@ namespace MD301Plus
                         (url.Scheme == Uri.UriSchemeHttp || url.Scheme == Uri.UriSchemeHttps);
                     if (!web && !File.Exists(action.Command) && !Directory.Exists(action.Command))
                         throw new FileNotFoundException("The launch target does not exist: " + action.Command);
-                    Process.Start(new ProcessStartInfo(action.Command) { UseShellExecute = true });
+                    ShellLauncher.Open(action.Command);
                 }
             }
             catch (Win32Exception ex) { ReportActionError("Action failed", ex); }
@@ -312,14 +312,15 @@ namespace MD301Plus
         [STAThread]
         private static int Main(string[] args)
         {
-            bool openSettings = false, openPreview = false;
+            bool openSettings = false, openPreview = false, startup = false;
             foreach (string arg in args)
             {
                 if (arg == "--settings") openSettings = true;
                 else if (arg == "--preview") openPreview = true;
+                else if (arg == "--startup") startup = true;
                 else
                 {
-                    MessageBox.Show("Usage: MD301Plus.exe [--settings] [--preview]", "MD301 Plus");
+                    MessageBox.Show("Usage: MD301Plus.exe [--settings] [--preview] [--startup]", "MD301 Plus");
                     return 2;
                 }
             }
@@ -330,6 +331,8 @@ namespace MD301Plus
             {
                 if (!created)
                 {
+                    // A sign-in launch must not open Settings over an already running copy.
+                    if (startup) return 0;
                     if (!RequestSettingsFromRunningInstance())
                         MessageBox.Show("MD301 Plus is already running. Right-click its mouse icon in the notification area to open Settings.",
                             "MD301 Plus");

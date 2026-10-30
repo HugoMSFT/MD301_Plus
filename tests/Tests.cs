@@ -83,6 +83,7 @@ namespace MD301Plus.Tests
                 TestEditorAndRendering();
                 TestActionDialogRendering();
                 TestNativeWindows();
+                TestShellLauncher(directory);
                 TestApplicationSettings(directory);
                 Console.WriteLine("PASS: " + assertions + " assertions, including native Windows hotkey and overlay smoke tests.");
                 return 0;
@@ -886,6 +887,25 @@ namespace MD301Plus.Tests
             using (RingApplication unassigned = new RingApplication(false, false, store, requestName))
                 Check(!unassigned.ActiveBinding.IsAssigned, "Starting without an assignment claims no button or hotkey");
             Console.WriteLine("PASS: tray lifecycle, second-launch Settings handoff, keyboard/mouse/disabled transitions, binding rollback and idempotent shutdown");
+        }
+
+        private static void TestShellLauncher(string directory)
+        {
+            Check(!ShellLauncher.IsPackaged, "Unit tests run without Store package identity");
+            string script = Path.Combine(directory, "desktop launch.cmd");
+            string marker = Path.Combine(directory, "desktop-launch.txt");
+            File.WriteAllText(script, "@echo launched> \"%~dp0desktop-launch.txt\"\r\n");
+            ShellLauncher.OpenThroughDesktop(script, 0);
+            Stopwatch timeout = Stopwatch.StartNew();
+            string text = null;
+            while (text == null && timeout.ElapsedMilliseconds < 15000)
+            {
+                Thread.Sleep(50);
+                try { if (File.Exists(marker)) text = File.ReadAllText(marker).Trim(); }
+                catch (IOException) { }
+            }
+            Check(text == "launched", "Explorer opens a launch target for the Store version");
+            Console.WriteLine("PASS: Explorer opens launch targets outside the app");
         }
 
         private static void PumpUntil(Func<bool> done, string message)
