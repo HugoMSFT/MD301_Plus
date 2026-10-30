@@ -3,6 +3,8 @@
 Press a button on your ASUS ProArt MD301 mouse, and a ring of shortcuts opens at
 the pointer. Click one to run it.
 
+Free to use. No ads, subscriptions, or in-app purchases.
+
 ![The MD301 Plus action ring](docs/ring.png)
 
 ## Install
@@ -51,5 +53,6 @@ Open **Settings > Apps > Installed apps**, find **MD301 Plus**, and select
 - [Full guide](docs/GUIDE.md): every option, troubleshooting, and how to build
   from source.
 - [Report a problem](https://github.com/HugoMSFT/MD301_Plus/issues)
+- [Privacy](docs/PRIVACY.md): your settings and logs stay on your PC.
 
 MD301 Plus is an independent project. It isn't made by or affiliated with ASUS.
