@@ -38,6 +38,36 @@ Windows 10 version 1903 and later. It does not need administrator rights.
   `%LOCALAPPDATA%\MD301Plus` in case you reinstall. Delete that folder to remove
   them too.
 
+### Smart App Control blocked MD301 Plus
+
+On Windows 11, **Smart App Control** may block `MD301Plus.exe` with the message
+"Smart App Control blocked an app that may be unsafe" because Windows could not
+verify its publisher. Smart App Control runs an app only when Microsoft's cloud
+security service predicts that it is safe, or when the app has a valid signature
+from a trusted certificate provider. MD301 Plus releases are not code-signed yet,
+so Windows can block them even after you install them. The release checksums and
+build provenance show where a file came from, but Smart App Control does not use
+them.
+
+Smart App Control has no way to allow one app. Unblocking the file, reinstalling,
+or using the portable ZIP won't help, because each uses the same unsigned app.
+Your choices are:
+
+- **Wait for a signed version.** Releases will be signed after trusted signing is
+  set up. The blocked message says Microsoft will review the app, but Microsoft
+  gives no timeline for that review.
+- **Turn Smart App Control off.** Open **Windows Security**, select **App &
+  browser control**, then **Smart App Control settings**, and select **Off**.
+  This removes Smart App Control protection for every app, not just MD301 Plus;
+  Microsoft Defender Antivirus and SmartScreen keep running. Recent Windows 11
+  updates let you turn Smart App Control back on from the same page. On older
+  Windows 11 versions, turning it back on required resetting or reinstalling
+  Windows, so update Windows first if you want to turn it back on later.
+
+To confirm that Smart App Control caused a block, open **Event Viewer >
+Applications and Services Logs > Microsoft > Windows > CodeIntegrity >
+Operational** and look for events 3033 or 3077 that name `MD301Plus.exe`.
+
 ## How it works
 
 ```text
@@ -409,11 +439,15 @@ compare the hash with the matching line in that file. GitHub build provenance
 can also be checked with `gh attestation verify .\MD301Plus-Portable.zip
 --repo HugoMSFT/MD301_Plus`. These checks show that the download matches the
 published file and was built by the repository's GitHub Actions workflow; they
-do not certify that software is free of bugs or prevent SmartScreen warnings.
+do not certify that software is free of bugs or prevent SmartScreen warnings or
+Smart App Control blocks.
 
-The app and installer are not code-signed. Signing requires a paid certificate
-or service, so releases remain unsigned; SmartScreen may warn about unfamiliar
-or uncommon downloads.
+The app and installer are not code-signed. Until releases are signed with a
+certificate from a trusted provider, SmartScreen may warn about unfamiliar or
+uncommon downloads, and Smart App Control may block the app. Free routes to a
+trusted signature include publishing an MSIX package through the Microsoft Store,
+which signs Store packages, or applying to the SignPath Foundation's free
+open-source code signing program.
 
 To publish a release:
 
