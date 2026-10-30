@@ -2,8 +2,13 @@
 param(
     [switch]$Test,
     [switch]$Installer,
+    [switch]$Package,
     [string]$OutputDirectory = 'bin',
-    [string]$InnoSetupCompiler
+    [string]$InnoSetupCompiler,
+    [string]$MakeAppx,
+    [string]$PackageIdentityName,
+    [string]$PackagePublisher,
+    [string]$PackagePublisherDisplayName
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,7 +25,13 @@ $output = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
 }
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 $output = (Resolve-Path -LiteralPath $output).ProviderPath
-& (Join-Path $PSScriptRoot 'tools\New-AppIcon.ps1') -OutputDirectory $output
+$packageStage = Join-Path $output 'msix'
+$iconParameters = @{ OutputDirectory = $output }
+if ($Package) {
+    if (Test-Path -LiteralPath $packageStage) { Remove-Item -LiteralPath $packageStage -Recurse -Force }
+    $iconParameters.PackageAssetDirectory = Join-Path $packageStage 'Assets'
+}
+& (Join-Path $PSScriptRoot 'tools\New-AppIcon.ps1') @iconParameters
 $appIcon = Join-Path $output 'MD301Plus.ico'
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Filter '*.cs' |
     Sort-Object Name | ForEach-Object { $_.FullName })
@@ -89,4 +100,55 @@ if ($Installer) {
         throw 'Installer compilation failed.'
     }
     Write-Output ('Built ' + (Join-Path $output 'MD301Plus-Setup.exe'))
+}
+
+if ($Package) {
+    $fileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($app).FileVersion
+    if ($fileVersion -notmatch '^\d+\.\d+\.\d+\.0$') {
+        throw ('The Microsoft Store needs a package version that ends in .0. Set AssemblyFileVersion in ' +
+            'src\AssemblyInfo.cs to major.minor.patch.0 (found "{0}").' -f $fileVersion)
+    }
+    # Local builds use placeholders; Store uploads must use the identity from Partner Center.
+    $identity = @{
+        IdentityName = $(if ($PackageIdentityName) { $PackageIdentityName } else { 'HugoMSFT.MD301Plus' })
+        Publisher = $(if ($PackagePublisher) { $PackagePublisher } else { 'CN=HugoMSFT' })
+        PublisherDisplayName = $(if ($PackagePublisherDisplayName) { $PackagePublisherDisplayName } else { 'HugoMSFT' })
+        Version = $fileVersion
+    }
+    $manifest = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'packaging\AppxManifest.xml'))
+    foreach ($token in $identity.GetEnumerator()) {
+        $manifest = $manifest.Replace('{{' + $token.Key + '}}', [System.Security.SecurityElement]::Escape($token.Value))
+    }
+    if ($manifest -match '\{\{\w+\}\}') {
+        throw ('packaging\AppxManifest.xml has an unknown placeholder: ' + $Matches[0])
+    }
+    New-Item -ItemType Directory -Path $packageStage -Force | Out-Null
+    Copy-Item -LiteralPath $app, ($app + '.config') -Destination $packageStage
+    [System.IO.File]::WriteAllText((Join-Path $packageStage 'AppxManifest.xml'), $manifest,
+        (New-Object System.Text.UTF8Encoding $false))
+
+    $makeAppxPath = $MakeAppx
+    if (-not $makeAppxPath) {
+        $command = Get-Command 'makeappx.exe' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($command) { $makeAppxPath = $command.Path }
+    }
+    if (-not $makeAppxPath -and ${env:ProgramFiles(x86)}) {
+        $makeAppxPath = Get-ChildItem -Path (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin\*\x64\makeappx.exe') `
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.Directory.Parent.Name -match '^\d+(\.\d+){3}$' } |
+            Sort-Object -Descending -Property { [Version]$_.Directory.Parent.Name } |
+            Select-Object -First 1 -ExpandProperty FullName
+    }
+    if (-not $makeAppxPath -or -not (Test-Path -LiteralPath $makeAppxPath)) {
+        throw ('Building the Store package needs MakeAppx.exe from the Windows SDK ' +
+            '(https://developer.microsoft.com/windows/downloads/windows-sdk/). ' +
+            'Install it, or pass -MakeAppx with the path to makeappx.exe.')
+    }
+    $msix = Join-Path $output 'MD301Plus.msix'
+    $packOutput = & $makeAppxPath pack /o /d $packageStage /p $msix 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $packOutput | Write-Output
+        throw 'Store package creation failed.'
+    }
+    Write-Output "Built $msix"
 }

@@ -117,6 +117,12 @@ try {
     $null = $app.CloseMainWindow()
     $null = Wait-For { $app.Refresh(); $app.HasExited -or $app.MainWindowHandle -eq [IntPtr]::Zero }
     Assert (-not $app.HasExited -and $app.MainWindowHandle -eq [IntPtr]::Zero) 'closing Settings keeps the app running in the notification area'
+    $quiet = Start-App @('--startup')
+    Assert ($quiet.WaitForExit(15000)) 'a sign-in launch exits when the app is already running'
+    Assert ($quiet.ExitCode -eq 0) "the sign-in launch exits cleanly (exit code $($quiet.ExitCode))"
+    Start-Sleep -Seconds 1
+    $app.Refresh()
+    Assert ($app.MainWindowHandle -eq [IntPtr]::Zero) 'a sign-in launch does not open Settings in the running app'
     $second = Start-App @('--settings')
     Assert ($second.WaitForExit(15000)) 'starting MD301 Plus again hands off to the running app'
     Assert ($second.ExitCode -eq 0) "the second launch exits cleanly (exit code $($second.ExitCode))"

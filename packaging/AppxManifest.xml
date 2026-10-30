@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- build.ps1 -Package fills in the {{...}} values. The Store identity values come from Partner Center. -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap10 desktop rescap">
+
+  <Identity Name="{{IdentityName}}" Publisher="{{Publisher}}" Version="{{Version}}" ProcessorArchitecture="neutral" />
+
+  <Properties>
+    <DisplayName>MD301 Plus</DisplayName>
+    <PublisherDisplayName>{{PublisherDisplayName}}</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <!-- Opening MD301 Plus from Start opens Settings, like the installer's Start menu shortcut. -->
+    <Application Id="MD301Plus" Executable="MD301Plus.exe" EntryPoint="Windows.FullTrustApplication"
+      uap10:Parameters="--settings">
+      <uap:VisualElements DisplayName="MD301 Plus" Description="Action ring for the ASUS ProArt MD301 mouse"
+        BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <!-- Starts quietly in the notification area at sign-in. Users can turn this off in Settings > Apps > Startup. -->
+        <desktop:Extension Category="windows.startupTask" Executable="MD301Plus.exe"
+          EntryPoint="Windows.FullTrustApplication" uap10:Parameters="--startup">
+          <desktop:StartupTask TaskId="MD301PlusStartup" Enabled="true" DisplayName="MD301 Plus" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

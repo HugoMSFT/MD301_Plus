@@ -510,7 +510,7 @@ namespace MD301Plus
         {
             try
             {
-                Process.Start(new ProcessStartInfo("https://gearlink.asus.com/en") { UseShellExecute = true });
+                ShellLauncher.Open("https://gearlink.asus.com/en");
                 if (pauseForSetup != null)
                 {
                     pauseForSetup();

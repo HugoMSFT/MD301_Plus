@@ -38,8 +38,15 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Installing Inno Setup failed.' }
           }
 
-      - name: Build, run unit tests and build the installer
-        run: .\build.ps1 -Test -Installer
+      - name: Build, run unit tests, and build the installer and Store package
+        env:
+          # Public Store identity values from Partner Center (Settings > Secrets and variables > Actions > Variables).
+          STORE_IDENTITY_NAME: ${{ vars.STORE_IDENTITY_NAME }}
+          STORE_PUBLISHER: ${{ vars.STORE_PUBLISHER }}
+          STORE_PUBLISHER_DISPLAY_NAME: ${{ vars.STORE_PUBLISHER_DISPLAY_NAME }}
+        run: |
+          .\build.ps1 -Test -Installer -Package -PackageIdentityName $env:STORE_IDENTITY_NAME `
+            -PackagePublisher $env:STORE_PUBLISHER -PackagePublisherDisplayName $env:STORE_PUBLISHER_DISPLAY_NAME
 
       - name: Check the tag matches the app version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -64,6 +71,9 @@ jobs:
       - name: Test the installer
         run: .\tests\Installer.Tests.ps1 -Setup bin\MD301Plus-Setup.exe
 
+      - name: Test the Store package
+        run: .\tests\Package.Tests.ps1 -Package bin\MD301Plus.msix
+
       - name: Attest build provenance
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/attest-build-provenance@v2
@@ -79,6 +89,13 @@ jobs:
             bin/MD301Plus-Setup.exe
             bin/MD301Plus-Portable.zip
             bin/MD301Plus-SHA256.txt
+          if-no-files-found: error
+
+      # Unsigned on purpose: upload it to Partner Center, which signs it for the Microsoft Store.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: MD301Plus-Store
+          path: bin/MD301Plus.msix
           if-no-files-found: error
 
   release:
