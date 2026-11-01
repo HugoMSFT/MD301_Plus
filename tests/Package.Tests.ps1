@@ -187,9 +187,12 @@ try {
     $packageSettings = Join-Path $env:LOCALAPPDATA ('Packages\{0}\LocalCache\Local\MD301Plus\settings.json' -f $installed.PackageFamilyName)
     Assert ((Test-Path -LiteralPath $packageSettings) -or (Test-Path -LiteralPath (Join-Path $settingsDir 'settings.json'))) 'the packaged app saves its settings'
 
-    Stop-Process -Id $app.Id -Force
-    Assert ($app.WaitForExit(15000)) 'the packaged app stops'
+    $removal = [Diagnostics.Stopwatch]::StartNew()
     Remove-AppxPackage -Package $installed.PackageFullName
+    $removal.Stop()
+    Write-Host ("Removal while running took {0:N1} seconds." -f $removal.Elapsed.TotalSeconds)
+    Assert ($app.WaitForExit(5000)) 'removing the package stops the running app'
+    Write-Host ("App exit code after removal: {0}" -f $app.ExitCode)
     Assert (@(Get-AppxPackage -Name $identity.Name).Count -eq 0) 'removing the package uninstalls MD301 Plus'
 
     Write-Host 'PASS: Store package install, Start launch, second launch and removal'
