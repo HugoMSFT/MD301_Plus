@@ -10,7 +10,11 @@ namespace MD301Plus
 {
     internal static class RingPainter
     {
-        internal static void Draw(Graphics graphics, RingGeometry geometry, IList<RingAction> actions, int hovered, bool preview, bool editing = false)
+        internal const float BatteryGapDegrees = 11;
+        internal static readonly Color BatteryTrack = Color.FromArgb(49, 53, 61);
+
+        internal static void Draw(Graphics graphics, RingGeometry geometry, IList<RingAction> actions, int hovered, bool preview,
+            bool editing = false, int battery = MouseBattery.Unknown)
         {
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
@@ -25,11 +29,14 @@ namespace MD301Plus
             using (Font label = new Font("Segoe UI Semibold", 14 * scale, FontStyle.Regular, GraphicsUnit.Pixel))
             using (Font small = new Font("Segoe UI", 11.5f * scale, FontStyle.Regular, GraphicsUnit.Pixel))
             using (Font title = new Font("Segoe UI Semibold", 18 * scale, FontStyle.Bold, GraphicsUnit.Pixel))
+            using (Font gaugeText = new Font("Segoe UI Semibold", 14 * scale, FontStyle.Regular, GraphicsUnit.Pixel))
+            using (Font gaugeIcon = new Font("Segoe MDL2 Assets", 17 * scale, FontStyle.Regular, GraphicsUnit.Pixel))
             {
                 graphics.Clear(Theme.Background);
                 float margin = 4 * scale;
                 graphics.DrawEllipse(border, margin, margin,
                     geometry.Bounds.Width - 2 * margin - 1, geometry.Bounds.Height - 2 * margin - 1);
+                DrawBattery(graphics, geometry, battery, gaugeText, gaugeIcon);
                 graphics.DrawEllipse(orbit, center.X - 154 * scale, center.Y - 154 * scale, 308 * scale, 308 * scale);
                 for (int i = 0; i < RingGeometry.ActionCount; i++)
                 {
@@ -70,6 +77,64 @@ namespace MD301Plus
             }
         }
 
+        internal static Color BatteryColor(int percent)
+        {
+            if (percent <= 10) return Color.FromArgb(232, 98, 86);
+            if (percent <= 20) return Color.FromArgb(232, 170, 76);
+            return Color.FromArgb(118, 200, 140);
+        }
+
+        // Clockwise sweep from just right of 12 o'clock; the gap at the top holds the readout.
+        internal static float BatterySweep(int percent)
+        {
+            if (percent <= 0) return 0;
+            return (360 - 2 * BatteryGapDegrees) * Math.Min(100, percent) / 100f;
+        }
+
+        internal static string BatteryDescription(int percent)
+        {
+            return percent >= 0 ? "Mouse battery " + percent + "%." : "Mouse battery level unavailable.";
+        }
+
+        private static void DrawBattery(Graphics graphics, RingGeometry geometry, int battery, Font font, Font glyphFont)
+        {
+            float scale = geometry.Scale;
+            PointF center = geometry.Center;
+            float radius = RingGeometry.GaugeRadius * scale;
+            RectangleF arc = new RectangleF(center.X - radius, center.Y - radius, 2 * radius, 2 * radius);
+            float start = -90 + BatteryGapDegrees;
+            using (Pen track = new Pen(BatteryTrack, RingGeometry.GaugeWidth * scale))
+            {
+                track.StartCap = LineCap.Round;
+                track.EndCap = LineCap.Round;
+                graphics.DrawArc(track, arc, start, 360 - 2 * BatteryGapDegrees);
+            }
+            float sweep = BatterySweep(battery);
+            if (sweep > 0)
+            {
+                using (Pen fill = new Pen(BatteryColor(battery), RingGeometry.GaugeWidth * scale))
+                {
+                    fill.StartCap = LineCap.Round;
+                    fill.EndCap = LineCap.Round;
+                    graphics.DrawArc(fill, arc, start, sweep);
+                }
+            }
+            bool known = battery >= 0;
+            string text = known ? battery + "%" : "--";
+            // Segoe MDL2 Assets: Battery0-9 are U+E850-E859, Battery10 is U+E83F, BatteryUnknown is U+E996.
+            int level = known ? (int)Math.Round(Math.Min(100, battery) / 10.0) : -1;
+            string glyph = !known ? "\uE996" : level >= 10 ? "\uE83F" : ((char)(0xE850 + level)).ToString();
+            SizeF textSize = graphics.MeasureString(text, font, PointF.Empty, StringFormat.GenericTypographic);
+            float glyphWidth = 19 * scale, spacing = 3 * scale, height = 20 * scale;
+            float left = center.X - (glyphWidth + spacing + textSize.Width) / 2;
+            float top = center.Y - radius - height / 2;
+            Text(graphics, glyph, glyphFont, known ? BatteryColor(battery) : Theme.Muted,
+                new RectangleF(left, top, glyphWidth, height));
+            float textCenter = left + glyphWidth + spacing + textSize.Width / 2;
+            Text(graphics, text, font, known ? Theme.Text : Theme.Muted,
+                new RectangleF(textCenter - textSize.Width / 2 - 8 * scale, top, textSize.Width + 16 * scale, height));
+        }
+
         private static void Text(Graphics graphics, string text, Font font, Color color, RectangleF area, bool wrap = false)
         {
             using (SolidBrush brush = new SolidBrush(color))
@@ -91,15 +156,37 @@ namespace MD301Plus
         private MenuInputCapture capture;
         private IntPtr source;
         private int hovered = -1;
+        private int battery = MouseBattery.Unknown;
         private bool preview;
         private int generation;
         internal event Action<RingAction, IntPtr, bool> ActionChosen;
+
+        internal int BatteryPercent
+        {
+            get { return battery; }
+            set
+            {
+                if (battery == value) return;
+                battery = value;
+                AccessibleDescription = Description;
+                if (Visible) Invalidate();
+            }
+        }
+
+        private string Description
+        {
+            get
+            {
+                return "Eight actions, clockwise from the top. Press 1 through 8 to choose, or Escape to cancel. " +
+                    RingPainter.BatteryDescription(battery);
+            }
+        }
 
         internal RingForm()
         {
             Text = "MD301 Plus action ring";
             AccessibleName = "MD301 Plus action ring";
-            AccessibleDescription = "Eight actions, clockwise from the top. Press 1 through 8 to choose, or Escape to cancel.";
+            AccessibleDescription = Description;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
@@ -222,7 +309,7 @@ namespace MD301Plus
         {
             base.OnPaint(e);
             if (geometry != null)
-                RingPainter.Draw(e.Graphics, geometry, settings.Actions, hovered, preview);
+                RingPainter.Draw(e.Graphics, geometry, settings.Actions, hovered, preview, false, battery);
         }
 
         protected override void Dispose(bool disposing)

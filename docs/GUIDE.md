@@ -387,6 +387,14 @@ requirements still apply, such as enabling clipboard history.
   supports the assigned command.
 - A selected action is canceled after two seconds if keyboard modifiers or the
   trigger button remain held. Release them and try again.
+- The circle around the ring is the MD301 battery gauge. It fills clockwise from
+  12 o'clock and is green above 20%, amber from 11-20%, and red at 10% or lower.
+  MD301 Plus reads the level when the ring, Preview, or Settings opens, and
+  every five minutes while it runs. It sends only the read-only ASUS battery
+  query (`0x12 0x07`) to the MD301's vendor HID interface (tested with the ASUS
+  USB receiver); it never sends commands that change mouse settings.
+  A sleeping mouse keeps its last reading. If no MD301 answers, for example
+  with the receiver unplugged, the gauge is empty and shows **--**.
 
 ## Development
 

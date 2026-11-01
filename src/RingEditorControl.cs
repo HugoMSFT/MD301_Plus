@@ -60,10 +60,22 @@ namespace MD301Plus
         private Point downPoint;
         private int downSlot = -1;
         private int dropSlot = -1;
+        private int battery = MouseBattery.Unknown;
         internal int SelectedSlot { get; private set; }
         internal event Action Changed;
         internal event Action SelectionChanged;
         internal event Action EditRequested;
+
+        internal int BatteryPercent
+        {
+            get { return battery; }
+            set
+            {
+                if (battery == value) return;
+                battery = value;
+                Invalidate();
+            }
+        }
 
         internal RingEditorControl(ActionDragSession drag, IList<RingAction> values)
         {
@@ -189,7 +201,7 @@ namespace MD301Plus
             base.OnPaint(e);
             RingGeometry geometry = Geometry();
             e.Graphics.TranslateTransform(geometry.Bounds.Left, geometry.Bounds.Top);
-            RingPainter.Draw(e.Graphics, geometry, actions, dropSlot >= 0 ? dropSlot : SelectedSlot, false, true);
+            RingPainter.Draw(e.Graphics, geometry, actions, dropSlot >= 0 ? dropSlot : SelectedSlot, false, true, battery);
         }
 
         protected override void OnResize(EventArgs e)

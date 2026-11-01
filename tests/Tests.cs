@@ -79,6 +79,7 @@ namespace MD301Plus.Tests
                 TestMouseBindings();
                 TestMediaKeys();
                 TestGeometry();
+                TestBattery();
                 TestInputLayout();
                 TestVisualDesign();
                 TestNativeMediaDelivery();
@@ -399,6 +400,121 @@ namespace MD301Plus.Tests
             Console.WriteLine("PASS: eight hit targets, screen edges, negative monitor origins and 100-300% DPI");
         }
 
+        private static void TestBattery()
+        {
+            byte[] request = MouseBatteryReader.BuildRequest();
+            Check(request.Length == 65 && request[0] == 0 && request[1] == 0x12 && request[2] == 0x07,
+                "The battery query is the ASUS read-only command 0x0712");
+            bool parameterFree = true;
+            for (int i = 3; i < request.Length; i++) if (request[i] != 0) parameterFree = false;
+            Check(parameterFree, "The battery query carries no parameters that could change the mouse");
+
+            byte[] reply = new byte[65];
+            byte[] captured = { 0x00, 0x12, 0x07, 0x00, 0x00, 0x61, 0x02, 0x14, 0x29, 0x28, 0x00, 0x01 };
+            Array.Copy(captured, reply, captured.Length);
+            Check(MouseBatteryReader.ParseResponse(reply) == 97, "Parse the battery reply captured from a real MD301 receiver");
+            reply[5] = 100;
+            Check(MouseBatteryReader.ParseResponse(reply) == 100, "Full battery");
+            reply[5] = 3;
+            Check(MouseBatteryReader.ParseResponse(reply) == 3, "Nearly empty battery");
+            reply[5] = 101;
+            Check(MouseBatteryReader.ParseResponse(reply) == MouseBattery.Unknown, "Reject impossible percentages");
+            byte[] empty = new byte[65];
+            empty[1] = 0x12;
+            empty[2] = 0x07;
+            Check(MouseBatteryReader.ParseResponse(empty) == MouseBattery.Unknown, "An empty frame from a sleeping mouse is not 0%");
+            byte[] asleep = new byte[65];
+            asleep[1] = 0xFF;
+            asleep[2] = 0xAA;
+            Check(MouseBatteryReader.IsUnavailable(asleep) && MouseBatteryReader.ParseResponse(asleep) == MouseBattery.Unknown,
+                "The ASUS unavailable status means unknown");
+            byte[] other = (byte[])reply.Clone();
+            other[2] = 0x04;
+            Check(!MouseBatteryReader.IsBatteryEcho(other) && MouseBatteryReader.ParseResponse(other) == MouseBattery.Unknown,
+                "Replies to other commands are ignored");
+            Check(MouseBatteryReader.ParseResponse(null) == MouseBattery.Unknown &&
+                MouseBatteryReader.ParseResponse(new byte[4]) == MouseBattery.Unknown, "Short reports are rejected");
+
+            BatteryRead state = BatteryRead.Ok;
+            int reading = 64;
+            using (MouseBattery monitor = new MouseBattery(delegate(out int percent) { percent = reading; return state; }, false))
+            {
+                int changes = 0;
+                monitor.Changed += delegate { changes++; };
+                Check(monitor.Percent == MouseBattery.Unknown, "The battery starts unknown");
+                monitor.Poll();
+                PumpUntil(delegate { return changes == 1; }, "A battery change is reported on the UI thread");
+                Check(monitor.Percent == 64, "The monitor keeps the latest reading");
+                state = BatteryRead.Asleep;
+                reading = MouseBattery.Unknown;
+                monitor.Poll();
+                Pump(50);
+                Check(monitor.Percent == 64 && changes == 1, "A sleeping mouse keeps its last reading");
+                state = BatteryRead.Missing;
+                monitor.Poll();
+                PumpUntil(delegate { return changes == 2; }, "Unplugging the receiver is reported");
+                Check(monitor.Percent == MouseBattery.Unknown, "Unplugging the receiver clears the reading");
+                state = BatteryRead.Ok;
+                reading = 50;
+                monitor.Refresh();
+                PumpUntil(delegate { return changes == 3 && monitor.Percent == 50; }, "Opening the ring refreshes the battery in the background");
+                reading = 10;
+                monitor.Refresh();
+                Pump(100);
+                Check(monitor.Percent == 50, "Back-to-back refreshes are throttled");
+            }
+
+            float full = 360 - 2 * RingPainter.BatteryGapDegrees;
+            Check(RingPainter.BatterySweep(MouseBattery.Unknown) == 0 && RingPainter.BatterySweep(0) == 0, "No fill when empty or unknown");
+            Check(Math.Abs(RingPainter.BatterySweep(100) - full) < 0.01 && Math.Abs(RingPainter.BatterySweep(50) - full / 2) < 0.01 &&
+                RingPainter.BatterySweep(250) == RingPainter.BatterySweep(100), "The gauge fill is proportional and capped");
+            Check(RingPainter.BatteryColor(80) != RingPainter.BatteryColor(15) &&
+                RingPainter.BatteryColor(15) != RingPainter.BatteryColor(5), "Low battery changes the gauge color");
+            Check(RingPainter.BatteryDescription(42) == "Mouse battery 42%." &&
+                RingPainter.BatteryDescription(MouseBattery.Unknown) == "Mouse battery level unavailable.", "Accessible battery text");
+            Check(RingGeometry.GaugeRadius - RingGeometry.GaugeWidth / 2 - (154 + 104 / 2) >= 8, "The gauge clears the action bubbles");
+            Check(RingGeometry.GaugeRadius + 10 < RingGeometry.BaseSize / 2 - 4, "The gauge and readout stay inside the ring border");
+
+            int size = RingGeometry.BaseSize;
+            RingGeometry geometry = new RingGeometry(new Point(size / 2, size / 2), new Rectangle(0, 0, size, size), 1);
+            float start = -90 + RingPainter.BatteryGapDegrees;
+            using (Bitmap image = new Bitmap(size, size))
+            {
+                foreach (int level in new[] { 50, 15, MouseBattery.Unknown })
+                {
+                    using (Graphics graphics = Graphics.FromImage(image))
+                        RingPainter.Draw(graphics, geometry, RingSettings.CreateDefault().Actions, -1, false, false, level);
+                    Color filled = GaugePixel(image, geometry, start + full * 0.05f);
+                    Color remaining = GaugePixel(image, geometry, start + full * 0.8f);
+                    Check(filled.ToArgb() == (level > 0 ? RingPainter.BatteryColor(level) : RingPainter.BatteryTrack).ToArgb(),
+                        "The gauge fills clockwise from the top at " + level + "%");
+                    Check(remaining.ToArgb() == RingPainter.BatteryTrack.ToArgb(), "The rest of the gauge shows the track at " + level + "%");
+                    bool readout = false;
+                    for (int x = size / 2 - 20; x <= size / 2 + 20 && !readout; x++)
+                        for (int y = size / 2 - 228; y <= size / 2 - 214 && !readout; y++)
+                            if (image.GetPixel(x, y).ToArgb() != Theme.Background.ToArgb()) readout = true;
+                    Check(readout, "The battery readout is always drawn at the top of the ring");
+                    image.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                        "battery-ring-" + (level < 0 ? "unknown" : level.ToString()) + "-preview.png"), ImageFormat.Png);
+                }
+            }
+
+            int live;
+            BatteryRead device = MouseBatteryReader.Read(out live);
+            Console.WriteLine("INFO: MD301 receiver " + (device == BatteryRead.Missing ? "not found" :
+                device == BatteryRead.Asleep ? "found, mouse asleep" : "reports " + live + "% battery"));
+            if (device == BatteryRead.Ok) Check(live >= 0 && live <= 100, "A live MD301 reports a valid percentage");
+            Console.WriteLine("PASS: read-only MD301 battery protocol, background monitor and circular gauge");
+        }
+
+        private static Color GaugePixel(Bitmap image, RingGeometry geometry, float degrees)
+        {
+            double angle = degrees * Math.PI / 180;
+            float radius = RingGeometry.GaugeRadius * geometry.Scale;
+            return image.GetPixel((int)Math.Round(geometry.Center.X + radius * Math.Cos(angle)),
+                (int)Math.Round(geometry.Center.Y + radius * Math.Sin(angle)));
+        }
+
         private static void TestInputLayout()
         {
             Check(Marshal.SizeOf(typeof(Native.Input)) == (IntPtr.Size == 8 ? 40 : 28), "INPUT matches the Windows native ABI");
@@ -531,11 +647,12 @@ namespace MD301Plus.Tests
                 paused.Close();
                 Check(resumed == 1, "Closing a clean setup editor resumes the saved ring");
             }
-            RingGeometry geometry = new RingGeometry(new Point(220, 220), new Rectangle(0, 0, 440, 440), 1);
-            using (Bitmap image = new Bitmap(440, 440))
+            int ringSize = RingGeometry.BaseSize;
+            RingGeometry geometry = new RingGeometry(new Point(ringSize / 2, ringSize / 2), new Rectangle(0, 0, ringSize, ringSize), 1);
+            using (Bitmap image = new Bitmap(ringSize, ringSize))
             {
                 using (Graphics graphics = Graphics.FromImage(image))
-                    RingPainter.Draw(graphics, geometry, settings.Actions, 2, false);
+                    RingPainter.Draw(graphics, geometry, settings.Actions, 2, false, false, 82);
                 for (int i = 0; i < 8; i++)
                 {
                     RectangleF bubble = geometry.Bubble(i);
