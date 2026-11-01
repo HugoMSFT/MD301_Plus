@@ -18,6 +18,9 @@ The app listens for the trigger you assign and for input needed to operate or
 dismiss the ring. It does not record a history of what you type or which apps
 you use.
 
+To show the battery gauge, the app asks a connected MD301 for its battery level.
+The level is shown in the ring only; it is not saved or sent anywhere.
+
 ## Websites and other apps
 
 When you choose a launch action, MD301 Plus asks Windows to open its target.

@@ -42,6 +42,11 @@ Windows may warn about them:
 Now press that mouse button. The ring opens at the pointer. Click a shortcut, or
 press **Esc** to close the ring.
 
+The outer circle of the ring shows your mouse's battery level. It fills
+clockwise from the top, and turns amber at 20% and red at 10%. If the level
+can't be read, for example when the mouse isn't connected through its ASUS USB
+receiver, the ring shows **--**.
+
 MD301 Plus keeps running in the notification area of the taskbar. To change your
 ring, open **MD301 Plus** from the Start menu.
 

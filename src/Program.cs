@@ -53,6 +53,7 @@ namespace MD301Plus
         private readonly ToolStripMenuItem resumeMenu;
         private readonly System.Windows.Forms.Timer executionTimer;
         private readonly SettingsRequestWindow settingsRequests;
+        private readonly MouseBattery battery;
         private readonly Stopwatch wait = new Stopwatch();
         private RingSettings settings;
         private SettingsForm editor;
@@ -81,6 +82,8 @@ namespace MD301Plus
             icon = CreateIcon();
             ring = new RingForm { Icon = icon };
             ring.ActionChosen += ChooseAction;
+            battery = new MouseBattery();
+            battery.Changed += ShowBattery;
             executionTimer = new System.Windows.Forms.Timer { Interval = 20 };
             executionTimer.Tick += ExecutePending;
             trayMenu = new ContextMenuStrip();
@@ -125,13 +128,21 @@ namespace MD301Plus
             }
             bool editorFocused = editor != null && editor.ContainsFocus;
             if (editorFocused) editor.NotifyTriggerReceived();
+            battery.Refresh();
             try { ring.ShowMenu(settings, target, editorFocused); }
             catch (ExternalException ex) { ReportActionError("Cannot open the action ring", ex); }
+        }
+
+        private void ShowBattery()
+        {
+            ring.BatteryPercent = battery.Percent;
+            if (editor != null && !editor.IsDisposed) editor.RingEditor.BatteryPercent = battery.Percent;
         }
 
         private void ShowPreview(RingSettings draft)
         {
             CancelPending();
+            battery.Refresh();
             try { ring.ShowMenu(draft, Native.GetForegroundWindow(), true,
                 registration == null ? TriggerBinding.Parse(settings.Trigger) : registration.Binding); }
             catch (ExternalException ex) { ReportActionError("Cannot show preview", ex); }
@@ -145,8 +156,10 @@ namespace MD301Plus
             {
                 editor = new SettingsForm(settings, ApplySettings, ShowPreview, PauseTriggerForSetup, ResumeSavedTrigger, resumeMenu.Enabled);
                 editor.Icon = icon;
+                editor.RingEditor.BatteryPercent = battery.Percent;
                 editor.FormClosed += delegate { editor = null; ring.CloseMenu(); };
                 editor.Show();
+                battery.Refresh();
             }
             else
             {
@@ -293,6 +306,7 @@ namespace MD301Plus
             if (disposing && !disposed)
             {
                 disposed = true;
+                battery.Dispose();
                 settingsRequests.Dispose();
                 executionTimer.Dispose();
                 if (editor != null) editor.Dispose();

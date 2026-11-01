@@ -5,8 +5,11 @@ namespace MD301Plus
 {
     public sealed class RingGeometry
     {
-        public const int BaseSize = 440;
+        public const int BaseSize = 480;
         public const int ActionCount = 8;
+        // The battery gauge circles the bubbles (outer edge 206) inside the window border (236).
+        public const float GaugeRadius = 221;
+        public const float GaugeWidth = 8;
         public Rectangle Bounds { get; private set; }
         public float Scale { get; private set; }
         public PointF Center { get { return new PointF(Bounds.Width / 2f, Bounds.Height / 2f); } }
