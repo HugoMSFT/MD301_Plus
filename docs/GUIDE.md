@@ -20,7 +20,15 @@ instead of shrinking or hiding common action names.
 
 ## Install
 
-Download **MD301Plus-Setup.exe** from the
+The easiest way is to
+**[get MD301 Plus from the Microsoft Store](https://apps.microsoft.com/detail/9PG3VJDNT81F)**.
+The Store version is free, signed by Microsoft, and updates automatically, so
+SmartScreen and Smart App Control allow it. See
+[Microsoft Store package](#microsoft-store-package) for how it differs from the
+installer. If you already installed MD301 Plus from GitHub, uninstall that copy
+first so only one copy starts when you sign in.
+
+To use the installer instead, download **MD301Plus-Setup.exe** from the
 [latest release](https://github.com/HugoMSFT/MD301_Plus/releases/latest) and run it.
 Setup needs Windows 10 or 11 with .NET Framework 4.8, which is included in
 Windows 10 version 1903 and later. It does not need administrator rights.
@@ -53,11 +61,10 @@ Smart App Control has no way to allow one app. Unblocking the file, reinstalling
 or using the portable ZIP won't help, because each uses the same unsigned app.
 Your choices are:
 
-- **Wait for the Microsoft Store version.** The Microsoft Store signs the apps
-  it publishes, so Smart App Control allows them. A Store version of MD301 Plus
-  is being prepared, and this guide will link to it when it is published. The
-  blocked message also says Microsoft will review the app, but Microsoft gives no
-  timeline for that review.
+- **Install the Microsoft Store version.** The Microsoft Store signs the apps
+  it publishes, so Smart App Control allows them.
+  [Get MD301 Plus from the Microsoft Store](https://apps.microsoft.com/detail/9PG3VJDNT81F),
+  after uninstalling the blocked copy from **Settings > Apps > Installed apps**.
 - **Turn Smart App Control off.** Open **Windows Security**, select **App &
   browser control**, then **Smart App Control settings**, and select **Off**.
   This removes Smart App Control protection for every app, not just MD301 Plus;
@@ -484,7 +491,13 @@ To publish MD301 Plus in the Microsoft Store:
 5. Complete the Store listing and age rating, and submit the app for
    certification.
 
-When the app is published, link to its Store page from the README.
+MD301 Plus is published at
+[apps.microsoft.com/detail/9PG3VJDNT81F](https://apps.microsoft.com/detail/9PG3VJDNT81F).
+To publish an update, raise the version as described in
+[Portable download and verification](#portable-download-and-verification),
+download the `MD301Plus-Store` artifact from that build, select **Start update**
+on the app's Partner Center overview, upload the new `MD301Plus.msix` on the
+**Packages** page, and submit it for certification.
 
 ### Portable download and verification
 
@@ -502,12 +515,12 @@ published file and was built by the repository's GitHub Actions workflow; they
 do not certify that software is free of bugs or prevent SmartScreen warnings or
 Smart App Control blocks.
 
-The app and installer are not code-signed. Until releases are signed with a
-certificate from a trusted provider, SmartScreen may warn about unfamiliar or
-uncommon downloads, and Smart App Control may block the app. Free routes to a
-trusted signature include publishing the
-[Microsoft Store package](#microsoft-store-package), which the Store signs, or
-applying to the SignPath Foundation's free open-source code signing program.
+The installer and portable app are not code-signed, so SmartScreen may warn
+about them and Smart App Control may block them. The
+[Microsoft Store version](https://apps.microsoft.com/detail/9PG3VJDNT81F) is
+signed by the Store and avoids both. Another free route to a trusted signature
+for the GitHub downloads is the SignPath Foundation's free open-source code
+signing program.
 
 To publish a release:
 

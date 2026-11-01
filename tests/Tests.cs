@@ -51,6 +51,9 @@ namespace MD301Plus.Tests
     {
         private static int assertions;
 
+        [DllImport("user32.dll")]
+        private static extern int GetWindowLong(IntPtr window, int index);
+
         [STAThread]
         private static int Main(string[] args)
         {
@@ -787,6 +790,8 @@ namespace MD301Plus.Tests
                 ring.ShowMenu(RingSettings.CreateDefault(), foreground, true);
                 Check(ring.Visible, "Native overlay opens");
                 Check(Native.GetForegroundWindow() == foreground, "Opening the ring does not steal focus");
+                Check(!ring.ContainsFocus, "Opening the ring never takes keyboard focus, even from the app's own windows");
+                Check((GetWindowLong(ring.Handle, -20) & 0x00000008) != 0, "The ring stays above other windows");
                 Check(!ring.Region.IsVisible(0, 0), "Overlay has a circular window region");
                 ring.CompleteSelection(7);
                 PumpUntil(delegate { return chosen != null; }, "Dispatch the eighth action");
@@ -804,6 +809,15 @@ namespace MD301Plus.Tests
                 Application.DoEvents();
                 Check(chosen == null && ring.Visible, "A queued selection from a closed ring cannot affect a newly opened ring");
                 ring.CloseMenu();
+                using (HotkeyWindow background = new HotkeyWindow())
+                {
+                    ring.ShowMenu(RingSettings.CreateDefault(), background.Handle, true);
+                    Pump(300);
+                    Check(ring.Visible, "A preview stays open when the window that opened it is not in front");
+                    ring.CloseMenu();
+                    ring.ShowMenu(RingSettings.CreateDefault(), background.Handle, false);
+                    PumpUntil(delegate { return !ring.Visible; }, "A live ring closes when its target application is not in front");
+                }
             }
             Console.WriteLine("PASS: native hotkeys, conflicts, cleanup, non-activating overlay, selection and cancellation");
         }
@@ -906,6 +920,16 @@ namespace MD301Plus.Tests
             }
             Check(text == "launched", "Explorer opens a launch target for the Store version");
             Console.WriteLine("PASS: Explorer opens launch targets outside the app");
+        }
+
+        private static void Pump(int milliseconds)
+        {
+            Stopwatch elapsed = Stopwatch.StartNew();
+            while (elapsed.ElapsedMilliseconds < milliseconds)
+            {
+                Application.DoEvents();
+                Thread.Sleep(1);
+            }
         }
 
         private static void PumpUntil(Func<bool> done, string message)

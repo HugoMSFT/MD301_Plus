@@ -9,24 +9,29 @@ Free to use. No ads, subscriptions, or in-app purchases.
 
 ## Install
 
-**Install normally:** [Download MD301Plus-Setup.exe](https://github.com/HugoMSFT/MD301_Plus/releases/latest/download/MD301Plus-Setup.exe)
-and run it. No administrator rights are needed.
+**[Get MD301 Plus from the Microsoft Store](https://apps.microsoft.com/detail/9PG3VJDNT81F)**
+(recommended). It's free, signed by Microsoft, and updates automatically, so
+Windows won't warn about it or block it.
 
-**Run without installing:** [Download MD301Plus-Portable.zip](https://github.com/HugoMSFT/MD301_Plus/releases/latest/download/MD301Plus-Portable.zip),
-extract it, then double-click `MD301Plus.exe`. It stays in the notification
-area while it is running.
+Other options, if you can't use the Store:
+
+- **Installer:** [Download MD301Plus-Setup.exe](https://github.com/HugoMSFT/MD301_Plus/releases/latest/download/MD301Plus-Setup.exe)
+  and run it.
+- **Run without installing:** [Download MD301Plus-Portable.zip](https://github.com/HugoMSFT/MD301_Plus/releases/latest/download/MD301Plus-Portable.zip),
+  extract it, then double-click `MD301Plus.exe`. It stays in the notification
+  area while it is running.
 
 Works on Windows 10 and 11. You don't need administrator rights.
 
-GitHub Actions builds and tests each release. The release includes SHA-256
-checksums and GitHub build provenance so you can verify the files came from this
-repository. The app is not code-signed yet, so Windows may still warn about it:
+The installer and portable downloads are built and tested by GitHub Actions and
+include SHA-256 checksums and build provenance, but they are not code-signed, so
+Windows may warn about them:
 
 - **"Windows protected your PC" (SmartScreen):** select **More info**, then
   **Run anyway**.
-- **"Smart App Control blocked an app":** Windows 11 can't allow just one app.
-  You can turn Smart App Control off, which lowers protection for every app, or
-  wait for a signed version. [What to do](docs/GUIDE.md#smart-app-control-blocked-md301-plus)
+- **"Smart App Control blocked an app":** use the
+  [Microsoft Store version](https://apps.microsoft.com/detail/9PG3VJDNT81F)
+  instead. [More details](docs/GUIDE.md#smart-app-control-blocked-md301-plus)
 
 ## Use
 
