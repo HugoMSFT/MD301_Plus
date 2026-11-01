@@ -102,7 +102,6 @@ namespace MD301Plus
             AccessibleDescription = "Eight actions, clockwise from the top. Press 1 through 8 to choose, or Escape to cancel.";
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
-            TopMost = true;
             StartPosition = FormStartPosition.Manual;
             AutoScaleMode = AutoScaleMode.None;
             BackColor = Theme.Background;
@@ -110,7 +109,7 @@ namespace MD301Plus
             focusTimer = new Timer { Interval = 50 };
             focusTimer.Tick += delegate
             {
-                if (source != IntPtr.Zero && (!Native.IsWindow(source) || Native.GetForegroundWindow() != source))
+                if (!preview && source != IntPtr.Zero && (!Native.IsWindow(source) || Native.GetForegroundWindow() != source))
                     CloseMenu();
             };
         }
@@ -130,7 +129,9 @@ namespace MD301Plus
             get
             {
                 CreateParams parameters = base.CreateParams;
-                parameters.ExStyle |= 0x08000000 | 0x00000080;
+                // WS_EX_TOPMOST here instead of TopMost = true: WinForms focuses TopMost forms on Show,
+                // which made the ring the foreground window and closed previews opened from Settings.
+                parameters.ExStyle |= 0x08000000 | 0x00000080 | 0x00000008;
                 return parameters;
             }
         }
