@@ -187,10 +187,26 @@ try {
     $packageSettings = Join-Path $env:LOCALAPPDATA ('Packages\{0}\LocalCache\Local\MD301Plus\settings.json' -f $installed.PackageFamilyName)
     Assert ((Test-Path -LiteralPath $packageSettings) -or (Test-Path -LiteralPath (Join-Path $settingsDir 'settings.json'))) 'the packaged app saves its settings'
 
-    Stop-Process -Id $app.Id -Force
-    Assert ($app.WaitForExit(15000)) 'the packaged app stops'
-    Remove-AppxPackage -Package $installed.PackageFullName
-    Assert (@(Get-AppxPackage -Name $identity.Name).Count -eq 0) 'removing the package uninstalls MD301 Plus'
+    foreach ($trayOnly in @($false, $true)) {
+        if ($trayOnly) {
+            Add-AppxPackage -Path $signed
+            $app = Start-PackagedApp $appUserModelId
+            Assert ($null -ne $app) 'reinstalled app starts for the tray-only removal scenario'
+            $null = Wait-For { $app.HasExited -or (Test-SettingsOpen $app) }
+            Assert (Test-SettingsOpen $app) 'reinstalled app opens Settings'
+            $null = $app.CloseMainWindow()
+            $null = Wait-For { $app.Refresh(); $app.HasExited -or $app.MainWindowHandle -eq [IntPtr]::Zero }
+            Assert (-not $app.HasExited -and $app.MainWindowHandle -eq [IntPtr]::Zero) 'app is still running with no Settings window'
+        }
+        $removal = [Diagnostics.Stopwatch]::StartNew()
+        Remove-AppxPackage -Package $installed.PackageFullName
+        $removal.Stop()
+        Write-Host ("Removal while running (tray-only={0}) took {1:N1} seconds." -f $trayOnly, $removal.Elapsed.TotalSeconds)
+        Assert ($app.WaitForExit(5000)) 'removing the package stops the running app'
+        Write-Host ("App exit code after removal: {0}" -f $app.ExitCode)
+        Assert (@(Get-AppxPackage -Name $identity.Name).Count -eq 0) 'removing the package uninstalls MD301 Plus'
+        Assert (-not (Test-AppRunning)) 'removal releases the single-instance mutex'
+    }
 
     Write-Host 'PASS: Store package install, Start launch, second launch and removal'
 }

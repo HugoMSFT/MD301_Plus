@@ -58,6 +58,10 @@ To use the small DPI button below the scroll wheel instead, follow the
 Open **Settings > Apps > Installed apps**, find **MD301 Plus**, and select
 **Uninstall**.
 
+Windows can take a little time to finish removing the Store app. Wait for it to
+disappear from the list before trying again. You can first right-click its
+notification-area icon and choose **Exit**. Closing Settings alone leaves it running.
+
 ## More
 
 - [Full guide](docs/GUIDE.md): every option, troubleshooting, and how to build

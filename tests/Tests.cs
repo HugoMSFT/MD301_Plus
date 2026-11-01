@@ -54,6 +54,9 @@ namespace MD301Plus.Tests
         [DllImport("user32.dll")]
         private static extern int GetWindowLong(IntPtr window, int index);
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+
         [STAThread]
         private static int Main(string[] args)
         {
@@ -89,6 +92,7 @@ namespace MD301Plus.Tests
                 TestNativeWindows();
                 TestShellLauncher(directory);
                 TestApplicationSettings(directory);
+                TestWindowsShutdown(directory);
                 Console.WriteLine("PASS: " + assertions + " assertions, including native Windows hotkey and overlay smoke tests.");
                 return 0;
             }
@@ -1018,6 +1022,35 @@ namespace MD301Plus.Tests
             using (RingApplication unassigned = new RingApplication(false, false, store, requestName))
                 Check(!unassigned.ActiveBinding.IsAssigned, "Starting without an assignment claims no button or hotkey");
             Console.WriteLine("PASS: tray lifecycle, second-launch Settings handoff, keyboard/mouse/disabled transitions, binding rollback and idempotent shutdown");
+        }
+
+        private static void TestWindowsShutdown(string directory)
+        {
+            SettingsStore store = new SettingsStore(Path.Combine(directory, "shutdown.json"));
+            store.Save(RingSettings.CreateDefault());
+            foreach (int endMessage in new[] { 0x0016, 0x0010 })
+            {
+                string name = "MD301Plus.Shutdown.Test." + Guid.NewGuid().ToString("N");
+                using (RingApplication application = new RingApplication(false, false, store, name))
+                {
+                    int exits = 0;
+                    application.ThreadExit += delegate { exits++; };
+                    IntPtr window = Native.FindWindowEx(IntPtr.Zero, IntPtr.Zero, null, name + ".Lifetime");
+                    Check(window != IntPtr.Zero, "Tray-only app has a top-level Windows shutdown receiver");
+                    Check((GetWindowLong(window, -16) & 0x10000000) == 0, "The lifetime window stays invisible");
+                    Check(SendMessage(window, 0x0011, IntPtr.Zero, new IntPtr(1)) == new IntPtr(1) && exits == 0,
+                        "Consent to Restart Manager shutdown without exiting during its query");
+                    SendMessage(window, 0x0016, IntPtr.Zero, new IntPtr(1));
+                    Check(exits == 0, "A canceled shutdown leaves the app running");
+                    SendMessage(window, endMessage, new IntPtr(1), new IntPtr(1));
+                    Check(exits == 1, "Confirmed Windows shutdown requests exit the application context");
+                    SendMessage(window, endMessage, new IntPtr(1), new IntPtr(1));
+                    Check(exits == 1, "Repeated shutdown notifications are idempotent");
+                }
+                Check(Native.FindWindowEx(IntPtr.Zero, IntPtr.Zero, null, name + ".Lifetime") == IntPtr.Zero,
+                    "Disposing the app removes its shutdown receiver");
+            }
+            Console.WriteLine("PASS: tray-only Windows shutdown, canceled shutdown and cleanup");
         }
 
         private static void TestShellLauncher(string directory)
