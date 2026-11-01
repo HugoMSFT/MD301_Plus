@@ -349,6 +349,43 @@ namespace MD301Plus
         }
     }
 
+    // Message-only windows do not receive the shutdown broadcasts used by Windows servicing.
+    internal sealed class LifetimeWindow : NativeWindow, IDisposable
+    {
+        private readonly Action shutdown;
+        private bool ending;
+
+        internal LifetimeWindow(string name, Action shutdown)
+        {
+            this.shutdown = shutdown;
+            CreateHandle(new CreateParams { Caption = name, ExStyle = 0x08000080 });
+        }
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == 0x0011) // WM_QUERYENDSESSION: consent, but do not exit yet.
+            {
+                message.Result = new IntPtr(1);
+                return;
+            }
+            if (message.Msg == 0x0016 || message.Msg == 0x0010) // WM_ENDSESSION / WM_CLOSE
+            {
+                if (!ending && (message.Msg == 0x0010 || message.WParam != IntPtr.Zero))
+                {
+                    ending = true;
+                    shutdown();
+                }
+                return;
+            }
+            base.WndProc(ref message);
+        }
+
+        public void Dispose()
+        {
+            if (Handle != IntPtr.Zero) DestroyHandle();
+        }
+    }
+
     // Lets a second launch (for example from the Start menu) open Settings in the running instance.
     internal sealed class SettingsRequestWindow : NativeWindow, IDisposable
     {

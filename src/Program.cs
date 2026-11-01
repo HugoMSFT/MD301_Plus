@@ -53,6 +53,7 @@ namespace MD301Plus
         private readonly ToolStripMenuItem resumeMenu;
         private readonly System.Windows.Forms.Timer executionTimer;
         private readonly SettingsRequestWindow settingsRequests;
+        private readonly LifetimeWindow lifetime;
         private readonly MouseBattery battery;
         private readonly Stopwatch wait = new Stopwatch();
         private RingSettings settings;
@@ -106,6 +107,7 @@ namespace MD301Plus
             };
             tray.DoubleClick += delegate { ShowSettings(); };
             settingsRequests = new SettingsRequestWindow(settingsRequestName, ShowSettings);
+            lifetime = new LifetimeWindow(settingsRequestName + ".Lifetime", ExitThread);
             if (firstRun || openSettings || registrationError != null) ShowSettings();
             if (registrationError != null) AppLog.ShowError(editor, "Trigger unavailable", registrationError);
             if (openPreview) ShowPreview(settings);
@@ -307,6 +309,7 @@ namespace MD301Plus
             {
                 disposed = true;
                 battery.Dispose();
+                lifetime.Dispose();
                 settingsRequests.Dispose();
                 executionTimer.Dispose();
                 if (editor != null) editor.Dispose();

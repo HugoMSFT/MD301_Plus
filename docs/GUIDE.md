@@ -46,6 +46,22 @@ Windows 10 version 1903 and later. It does not need administrator rights.
   `%LOCALAPPDATA%\MD301Plus` in case you reinstall. Delete that folder to remove
   them too.
 
+### Removing the Store app
+
+Open **Settings > Apps > Installed apps**, select **MD301 Plus**, and choose
+**Uninstall**. Windows handles Store removal, including stopping the running app.
+The app also handles Windows shutdown requests while running only in the
+notification area. Closing the Settings window is not the same as exiting the app.
+
+Removal may take several seconds while Windows stops processes and cleans up the
+package. Wait for the entry to disappear before retrying. To exit first, right-click
+the app's notification-area icon and choose **Exit**. Do not manually delete or
+change permissions on `C:\Program Files\WindowsApps`; Windows manages that directory.
+
+If you also installed the GitHub installer, it is a separate installation. Uninstall
+that copy as well rather than deleting its executable, so its Start menu and sign-in
+entries are removed.
+
 ### Smart App Control blocked MD301 Plus
 
 On Windows 11, **Smart App Control** may block `MD301Plus.exe` with the message
