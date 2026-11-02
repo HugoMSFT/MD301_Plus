@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
@@ -11,16 +12,34 @@ namespace MD301Plus
 {
     internal static class AppLog
     {
+        private const long MaxBytes = 512 * 1024;
         internal static readonly string DirectoryPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MD301Plus");
-        internal static readonly string FilePath = Path.Combine(DirectoryPath, "app.log");
+        // Tests redirect this so they never write to the user's log.
+        internal static string FilePath = Path.Combine(DirectoryPath, "app.log");
 
         internal static string Error(string operation, Exception error)
         {
-            string entry = DateTime.UtcNow.ToString("O") + " " + operation + Environment.NewLine + error + Environment.NewLine;
+            return Write(DateTime.UtcNow.ToString("O") + " " + operation + Environment.NewLine + error + Environment.NewLine);
+        }
+
+        // Records events that otherwise leave no trace, such as a ring closed by another window or a canceled shortcut.
+        internal static void Note(string message)
+        {
+            Write(DateTime.UtcNow.ToString("O") + " " + message + Environment.NewLine);
+        }
+
+        private static string Write(string entry)
+        {
             try
             {
-                Directory.CreateDirectory(DirectoryPath);
+                Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
+                FileInfo existing = new FileInfo(FilePath);
+                if (existing.Exists && existing.Length > MaxBytes)
+                {
+                    File.Delete(FilePath + ".old");
+                    File.Move(FilePath, FilePath + ".old");
+                }
                 File.AppendAllText(FilePath, entry);
                 return "Details: " + FilePath;
             }
@@ -56,6 +75,8 @@ namespace MD301Plus
         private readonly LifetimeWindow lifetime;
         private readonly MouseBattery battery;
         private readonly Stopwatch wait = new Stopwatch();
+        private readonly Stopwatch sinceOpened = new Stopwatch();
+        internal const int RepeatTriggerMilliseconds = 250;
         private RingSettings settings;
         private SettingsForm editor;
         private TriggerRegistration registration;
@@ -113,11 +134,19 @@ namespace MD301Plus
             if (openPreview) ShowPreview(settings);
         }
 
-        private void ToggleRing()
+        internal bool IsRingOpen { get { return ring.Visible; } }
+
+        internal void ToggleRing()
         {
             if (editor != null && (editor.IsCapturingButton || editor.IsDragging || editor.HasModalEditor)) return;
             if (ring.Visible)
             {
+                // A second trigger right after opening is a bounced or repeated press, not a request to close.
+                if (sinceOpened.IsRunning && sinceOpened.ElapsedMilliseconds < RepeatTriggerMilliseconds)
+                {
+                    AppLog.Note("Ignored a repeated trigger " + sinceOpened.ElapsedMilliseconds + " ms after the action ring opened.");
+                    return;
+                }
                 ring.CloseMenu();
                 return;
             }
@@ -125,14 +154,20 @@ namespace MD301Plus
             IntPtr target = Native.GetForegroundWindow();
             if (target == IntPtr.Zero)
             {
+                AppLog.Note("Trigger received while no application was active; the action ring stayed closed.");
                 Notify("No active application", "Open a normal desktop application before opening the action ring.", ToolTipIcon.Warning);
                 return;
             }
             bool editorFocused = editor != null && editor.ContainsFocus;
             if (editorFocused) editor.NotifyTriggerReceived();
             battery.Refresh();
-            try { ring.ShowMenu(settings, target, editorFocused); }
+            try
+            {
+                ring.ShowMenu(settings, target, editorFocused);
+                sinceOpened.Restart();
+            }
             catch (ExternalException ex) { ReportActionError("Cannot open the action ring", ex); }
+            catch (InvalidOperationException ex) { ReportActionError("Cannot open the action ring", ex); }
         }
 
         private void ShowBattery()
@@ -145,9 +180,11 @@ namespace MD301Plus
         {
             CancelPending();
             battery.Refresh();
+            sinceOpened.Reset();
             try { ring.ShowMenu(draft, Native.GetForegroundWindow(), true,
                 registration == null ? TriggerBinding.Parse(settings.Trigger) : registration.Binding); }
             catch (ExternalException ex) { ReportActionError("Cannot show preview", ex); }
+            catch (InvalidOperationException ex) { ReportActionError("Cannot show preview", ex); }
         }
 
         private void ShowSettings()
@@ -231,17 +268,23 @@ namespace MD301Plus
         private void ExecutePending(object sender, EventArgs args)
         {
             if (pendingAction == null) { CancelPending(); return; }
-            if (pendingAction.Kind == "shortcut" &&
-                (!Native.IsWindow(pendingTarget) || Native.GetForegroundWindow() != pendingTarget))
+            // Media keys are global, so they still work when another window took the foreground.
+            IntPtr foreground = Native.GetForegroundWindow();
+            if (pendingAction.Kind == "shortcut" && !KeyboardShortcut.Parse(pendingAction.Command, false).IsMediaKey &&
+                (!Native.IsWindow(pendingTarget) || foreground != pendingTarget))
             {
+                AppLog.Note("Canceled \"" + pendingAction.Label + "\": " + Native.Describe(foreground) + " replaced " +
+                    Native.Describe(pendingTarget) + " in front.");
                 CancelPending();
                 Notify("Shortcut canceled", "The active application changed. Nothing was sent.", ToolTipIcon.Info);
                 return;
             }
-            if (Native.InputIsHeld(TriggerBinding.Parse(settings.Trigger)))
+            List<string> held = Native.HeldInputs(TriggerBinding.Parse(settings.Trigger));
+            if (held.Count > 0)
             {
                 if (wait.ElapsedMilliseconds >= 2000)
                 {
+                    AppLog.Note("Canceled \"" + pendingAction.Label + "\": still held after 2 seconds: " + string.Join(", ", held.ToArray()) + ".");
                     CancelPending();
                     Notify("Shortcut canceled", "Release the mouse button and keyboard modifiers, then try again.", ToolTipIcon.Warning);
                 }

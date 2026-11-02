@@ -309,11 +309,15 @@ the shortcut. The Productivity preset starts with these slots,
 | 7 | Task view | Win+Tab |
 | 8 | Screenshot | Win+Shift+S |
 
-Press **1-8** (including the number pad) to choose without clicking.
+Click anywhere in an action's slice of the ring, not only on its circle; a click
+between two circles selects the nearer one. Press **1-8** (including the number
+pad) to choose without clicking.
 Press the mapped button again, Escape, right-click, or click the center/outside
 to cancel. Canceling mouse clicks are consumed, so they cannot accidentally
 click the document underneath. An unrelated key cancels the ring and passes
 through normally. Changing foreground applications also dismisses the ring.
+A second trigger within a quarter second of opening is treated as a bounce and
+ignored, so a double-sent press cannot flash the ring closed.
 
 The ring-first editor persists all eight positions and the button choice with
 **Save changes**. Filling the ring with a category changes actions, not the
@@ -371,7 +375,13 @@ requirements still apply, such as enabling clipboard history.
 - The ring is a topmost **non-activating** native window. Shortcuts stay targeted
   at the application that was active when the ring opened. If that application
   closes or loses foreground status before delivery, the shortcut is canceled;
-  the app never forces another window into focus.
+  the app never forces another window into focus. Volume and media keys are
+  global, so they are still sent when another window comes to the front.
+- Start, Search, and Task View are drawn above every app, including the ring.
+  If one of them would hide the ring, MD301 Plus does not open it and shows a
+  notification instead; close them and press the button again. Holding Shift,
+  Ctrl, Alt, or Win while pressing a keyboard-mode trigger sends a different key
+  combination, so the ring does not open.
 - Placement follows the pointer's monitor, scales with its DPI, and stays inside
   its working area, including monitors with negative coordinates. Near a screen
   edge, the ring shifts inward without moving the pointer.
@@ -397,6 +407,12 @@ requirements still apply, such as enabling clipboard history.
 - Errors appear in a dialog or tray notification, with diagnostics in
   `%LOCALAPPDATA%\MD301Plus\app.log`. If a trigger is already taken, Settings
   opens so you can choose another one. Windows-reserved shortcuts may also fail.
+  Do Not Disturb can hide tray notifications, so the log also records silent
+  events: a ring closed because another app came to the front, a canceled
+  action and why, an ignored repeated trigger, and a click that bypassed the
+  menu listener while the app was busy. It records app process and window class
+  names, never window titles. The log is capped at about 512 KB, plus one older
+  copy (`app.log.old`).
 - Elevated applications, UAC/secure desktops, games, and apps that reject
   simulated input can block shortcuts. The app does not bypass these boundaries.
   Windows accepting injected keys does not guarantee that a particular app

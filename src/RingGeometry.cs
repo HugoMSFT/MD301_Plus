@@ -10,6 +10,8 @@ namespace MD301Plus
         // The battery gauge circles the bubbles (outer edge 206) inside the window border (236).
         public const float GaugeRadius = 221;
         public const float GaugeWidth = 8;
+        // The center hub shows the ring's title; a click there cancels.
+        public const float HubRadius = 59;
         public Rectangle Bounds { get; private set; }
         public float Scale { get; private set; }
         public PointF Center { get { return new PointF(Bounds.Width / 2f, Bounds.Height / 2f); } }
@@ -39,19 +41,18 @@ namespace MD301Plus
                 diameter, diameter);
         }
 
+        // Pie-menu hit test: every point on the ring outside the hub belongs to the action in that direction,
+        // so a click between two bubbles or beside a bubble still selects it instead of silently canceling.
         public int HitTest(Point screenPoint)
         {
-            float x = screenPoint.X - Bounds.Left;
-            float y = screenPoint.Y - Bounds.Top;
-            for (int i = 0; i < ActionCount; i++)
-            {
-                RectangleF bubble = Bubble(i);
-                float dx = x - (bubble.X + bubble.Width / 2);
-                float dy = y - (bubble.Y + bubble.Height / 2);
-                if (dx * dx + dy * dy <= bubble.Width * bubble.Width / 4)
-                    return i;
-            }
-            return -1;
+            float dx = screenPoint.X - Bounds.Left - Center.X;
+            float dy = screenPoint.Y - Bounds.Top - Center.Y;
+            double distance = Math.Sqrt(dx * dx + dy * dy);
+            if (distance <= HubRadius * Scale || distance > Bounds.Width / 2.0)
+                return -1;
+            double degreesFromTop = Math.Atan2(dy, dx) * 180 / Math.PI + 90;
+            int index = (int)Math.Floor((degreesFromTop + 180.0 / ActionCount) / (360.0 / ActionCount));
+            return (index % ActionCount + ActionCount) % ActionCount;
         }
     }
 }

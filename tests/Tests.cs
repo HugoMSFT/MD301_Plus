@@ -74,11 +74,13 @@ namespace MD301Plus.Tests
             }
             string directory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test-data-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
+            AppLog.FilePath = Path.Combine(directory, "app.log");
             try
             {
                 TestShortcuts();
                 TestApplicationIcon();
                 TestSettings(directory);
+                TestDiagnosticLog();
                 TestMouseBindings();
                 TestMediaKeys();
                 TestGeometry();
@@ -326,7 +328,28 @@ namespace MD301Plus.Tests
                     captured[2] == MouseButtonTrigger.Middle, "Capture reports the actual logical button");
                 Check(!capture.ProcessMouseEvent(0x0201, 0), "Capture never consumes primary click");
             }
-            Console.WriteLine("PASS: direct Back/Forward/middle assignment, capture, consumption, pass-through and cleanup");
+            int finished = -2;
+            TriggerBinding f22 = TriggerBinding.Parse("F22");
+            using (MenuInputCapture whole = new MenuInputCapture(delegate { return 4; }, delegate { }, delegate(int i) { finished = i; }, f22))
+            {
+                Check(whole.Mouse(0x0201, Point.Empty, 0, true) && whole.Mouse(0x0202, Point.Empty, 0, true) && finished == 4 && !whole.Bypassed,
+                    "A ring click seen by the mouse listener is swallowed whole and selects its action");
+            }
+            finished = -2;
+            using (MenuInputCapture split = new MenuInputCapture(delegate { return 4; }, delegate { }, delegate(int i) { finished = i; }, f22))
+            {
+                split.WindowMouse(0x0201, Point.Empty);
+                Check(!split.Mouse(0x0202, Point.Empty, 0, true) && finished == 4 && split.Bypassed,
+                    "A release whose press bypassed the listener still selects, and reaches Windows so the button is not left held down");
+            }
+            finished = -2;
+            using (MenuInputCapture late = new MenuInputCapture(delegate { return 4; }, delegate { }, delegate(int i) { finished = i; }, f22))
+            {
+                Check(late.Mouse(0x0201, Point.Empty, 0, true), "The listener swallows the press");
+                late.WindowMouse(0x0202, Point.Empty);
+                Check(finished == 4, "A release that bypassed the listener completes the click");
+            }
+            Console.WriteLine("PASS: direct Back/Forward/middle assignment, capture, consumption, pass-through, split ring clicks and cleanup");
         }
 
         private static void TestMediaKeys()
@@ -350,6 +373,11 @@ namespace MD301Plus.Tests
                     inputs[1].Data.Keyboard.Flags == (Native.ExtendedKey | Native.KeyUp), "Extended media/browser key flags: " + key.Key);
             }
             Check(KeyboardShortcut.Parse("PlayPause", false).Display == "MediaPlayPause", "Play/pause alias");
+            foreach (KeyValuePair<string, ushort> key in keys)
+                Check(KeyboardShortcut.Parse(key.Key, false).IsMediaKey == ((key.Value >= 0xAD && key.Value <= 0xB3) || key.Value == 0xB5),
+                    "Only volume and media keys are sent regardless of the app in front: " + key.Key);
+            Check(!KeyboardShortcut.Parse("Ctrl+C", false).IsMediaKey && !KeyboardShortcut.Parse("PrintScreen", false).IsMediaKey,
+                "App shortcuts still require their original app in front");
             Check(KeyboardShortcut.Parse("Mute", false).Key == 0xAD, "Mute alias");
             Check(KeyboardShortcut.Parse("NextTrack", false).Key == 0xB0, "Next-track alias");
             Check(KeyboardShortcut.Parse("PreviousTrack", false).Key == 0xB1, "Previous-track alias");
@@ -395,13 +423,54 @@ namespace MD301Plus.Tests
                     Check(Math.Sqrt(dx * dx + dy * dy) > bubble.Width, "Adjacent bubbles do not overlap");
                 }
                 Check(geometry.HitTest(new Point(area.Right + 100, area.Bottom + 100)) == -1, "Outside click is not an action");
+                float spoke = 154 * geometry.Scale, hub = RingGeometry.HubRadius * geometry.Scale;
+                for (int i = 0; i < 8; i++)
+                {
+                    Check(geometry.HitTest(Spot(geometry, i * 45 - 15, spoke)) == i && geometry.HitTest(Spot(geometry, i * 45 + 15, spoke)) == i,
+                        "A click beside bubble " + i + " still selects it at DPI " + scale);
+                    Check(geometry.HitTest(Spot(geometry, i * 45 + 30, spoke)) == (i + 1) % 8,
+                        "A click between bubbles selects the nearer action at DPI " + scale);
+                    Check(geometry.HitTest(Spot(geometry, i * 45, hub + 2)) == i, "Just outside the hub selects slot " + i);
+                    Check(geometry.HitTest(Spot(geometry, i * 45, hub - 2)) == -1, "The hub cancels in direction " + i);
+                    Check(geometry.HitTest(Spot(geometry, i * 45, geometry.Bounds.Width / 2f + 2)) == -1, "Beyond the ring edge cancels");
+                }
             }
             Throws<ArgumentOutOfRangeException>(delegate { new RingGeometry(Point.Empty, Rectangle.Empty, 1); }, "Reject empty monitor");
             Throws<ArgumentOutOfRangeException>(delegate { new RingGeometry(Point.Empty, areas[0], Single.NaN); }, "Reject invalid DPI");
             RingGeometry sample = new RingGeometry(new Point(960, 540), areas[0], 1);
             Throws<ArgumentOutOfRangeException>(delegate { sample.Bubble(8); }, "Reject ninth action");
             Check(sample.Bubble(0).Y < sample.Center.Y && sample.Bubble(2).X > sample.Center.X, "Start at top and advance clockwise");
-            Console.WriteLine("PASS: eight hit targets, screen edges, negative monitor origins and 100-300% DPI");
+            Console.WriteLine("PASS: eight pie-slice hit targets, hub cancel, screen edges, negative monitor origins and 100-300% DPI");
+        }
+
+        private static Point Spot(RingGeometry geometry, double degreesFromTop, double radius)
+        {
+            double angle = (degreesFromTop - 90) * Math.PI / 180;
+            return Point.Round(new PointF(geometry.Bounds.Left + geometry.Center.X + (float)(Math.Cos(angle) * radius),
+                geometry.Bounds.Top + geometry.Center.Y + (float)(Math.Sin(angle) * radius)));
+        }
+
+        private static void TestDiagnosticLog()
+        {
+            File.WriteAllText(AppLog.FilePath, new string('x', 600 * 1024));
+            AppLog.Note("rotation probe");
+            Check(File.Exists(AppLog.FilePath + ".old") && new FileInfo(AppLog.FilePath).Length < 1024 &&
+                File.ReadAllText(AppLog.FilePath).Contains("rotation probe"), "The diagnostic log is capped and keeps one older file");
+            File.Delete(AppLog.FilePath + ".old");
+            File.Delete(AppLog.FilePath);
+            Console.WriteLine("PASS: size-capped diagnostic log");
+        }
+
+        private static IntPtr ClientPoint(Point point)
+        {
+            return new IntPtr((point.Y << 16) | (point.X & 0xFFFF));
+        }
+
+        // SendMessage skips low-level hooks, like a click that arrives while the app is busy for 300+ ms.
+        private static void ClickWithoutHook(Form window, Point client)
+        {
+            SendMessage(window.Handle, 0x0201, new IntPtr(1), ClientPoint(client));
+            SendMessage(window.Handle, 0x0202, IntPtr.Zero, ClientPoint(client));
         }
 
         private static void TestBattery()
@@ -930,6 +999,20 @@ namespace MD301Plus.Tests
                 Application.DoEvents();
                 Check(chosen == null && ring.Visible, "A queued selection from a closed ring cannot affect a newly opened ring");
                 ring.CloseMenu();
+                RingSettings defaults = RingSettings.CreateDefault();
+                ring.ShowMenu(defaults, foreground, true);
+                float scale = ring.Width / (float)RingGeometry.BaseSize;
+                Point bubble3 = Point.Round(new PointF(ring.Width / 2f + (float)Math.Cos(Math.PI / 4) * 154 * scale,
+                    ring.Height / 2f + (float)Math.Sin(Math.PI / 4) * 154 * scale));
+                ClickWithoutHook(ring, bubble3);
+                PumpUntil(delegate { return chosen != null; }, "A click that bypasses the mouse listener still selects an action");
+                Check(chosen.Label == defaults.Actions[3].Label && !ring.Visible, "The ring window handles a bypassed click on the right bubble");
+                Check(File.ReadAllText(AppLog.FilePath).Contains("bypassed the mouse listener"), "A bypassed click is recorded in the log");
+                chosen = null;
+                ring.ShowMenu(defaults, foreground, true);
+                ClickWithoutHook(ring, new Point(ring.Width / 2, ring.Height / 2));
+                PumpUntil(delegate { return !ring.Visible; }, "A bypassed click on the hub closes the ring");
+                Check(chosen == null, "A bypassed click on the hub never executes an action");
                 using (HotkeyWindow background = new HotkeyWindow())
                 {
                     ring.ShowMenu(RingSettings.CreateDefault(), background.Handle, true);
@@ -958,6 +1041,17 @@ namespace MD301Plus.Tests
             {
                 Application.DoEvents();
                 Check(!application.IsSettingsOpen, "A normal tray start keeps Settings closed");
+                if (Native.GetForegroundWindow() != IntPtr.Zero)
+                {
+                    application.ToggleRing();
+                    Check(application.IsRingOpen, "The trigger opens the action ring");
+                    application.ToggleRing();
+                    Check(application.IsRingOpen, "A bounced trigger right after opening does not close the ring");
+                    Pump(RingApplication.RepeatTriggerMilliseconds + 50);
+                    application.ToggleRing();
+                    Check(!application.IsRingOpen, "A later trigger closes the ring");
+                    Check(File.ReadAllText(AppLog.FilePath).Contains("Ignored a repeated trigger"), "A bounced trigger is recorded in the log");
+                }
                 Throws<Win32Exception>(delegate { probe.Register(oldTrigger); }, "Tray application owns its configured trigger");
                 application.PauseTriggerForSetup();
                 Check(application.ActiveBinding == null, "Pause the trigger while recording the DPI key in Gear Link");

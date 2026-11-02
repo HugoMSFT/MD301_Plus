@@ -12,6 +12,10 @@ and folder paths or website URLs that you enter.
 When something fails, the app writes a local `app.log` with the error and
 diagnostic details. These details can include local paths, configured URLs,
 and exception messages. Paths or URLs may contain personal information.
+The log also notes when the ring closes or an action is canceled without an
+error, with the action's label and the process and window class names of the
+apps involved (for example `notepad (Notepad)`), but never window titles.
+The log is capped at about 512 KB plus one older copy.
 The app does not upload these files or send them to the developer.
 
 The app listens for the trigger you assign and for input needed to operate or
