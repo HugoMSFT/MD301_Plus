@@ -243,7 +243,8 @@ namespace MD301Plus
             RingGeometry layout = Geometry();
             float dx = e.X - layout.Bounds.Left - layout.Center.X;
             float dy = e.Y - layout.Bounds.Top - layout.Center.Y;
-            if (e.Button == MouseButtons.Left && dx * dx + dy * dy <= 59 * 59 * layout.Scale * layout.Scale)
+            float hub = RingGeometry.HubRadius * layout.Scale;
+            if (e.Button == MouseButtons.Left && dx * dx + dy * dy <= hub * hub)
                 RequestEdit();
         }
 

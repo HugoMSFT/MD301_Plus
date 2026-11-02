@@ -61,6 +61,12 @@ namespace MD301Plus
         public ushort Key { get; private set; }
         public string Display { get; private set; }
 
+        // Media and volume keys are handled by Windows for the whole session, whichever window is in front.
+        public bool IsMediaKey
+        {
+            get { return Modifiers == 0 && ((Key >= 0xAD && Key <= 0xB3) || Key == 0xB5); }
+        }
+
         private KeyboardShortcut(uint modifiers, ushort key, string display)
         {
             Modifiers = modifiers;

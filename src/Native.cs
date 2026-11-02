@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows.Forms;
 
 namespace MD301Plus
@@ -137,6 +139,49 @@ namespace MD301Plus
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool AllowSetForegroundWindow(uint processId);
 
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+        // Showing a hidden window keeps its old z-order slot, so an always-on-top window raised since the
+        // last show would cover it. Move it back to the top of the topmost band without activating it.
+        internal static void BringToTopmost(IntPtr window)
+        {
+            if (!SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr WindowFromPoint(NativePoint point);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr window, StringBuilder name, int capacity);
+
+        internal static IntPtr TopLevelWindowAt(Point point)
+        {
+            IntPtr window = WindowFromPoint(new NativePoint(point));
+            return window == IntPtr.Zero ? IntPtr.Zero : GetAncestor(window, 2); // GA_ROOT
+        }
+
+        // Process and window class only: titles can contain private document or message names.
+        internal static string Describe(IntPtr window)
+        {
+            if (window == IntPtr.Zero) return "no window";
+            StringBuilder name = new StringBuilder(256);
+            GetClassName(window, name, name.Capacity);
+            uint processId;
+            GetWindowThreadProcessId(window, out processId);
+            string process = "process " + processId;
+            try { using (Process owner = Process.GetProcessById((int)processId)) process = owner.ProcessName; }
+            catch (ArgumentException) { }
+            catch (InvalidOperationException) { }
+            catch (Win32Exception) { }
+            return process + " (" + name + ")";
+        }
+
         internal static float DpiScale(Point point)
         {
             uint x, y;
@@ -153,10 +198,19 @@ namespace MD301Plus
 
         internal static bool InputIsHeld(TriggerBinding trigger)
         {
-            return IsDown(0x10) || IsDown(0x11) || IsDown(0x12) ||
-                IsDown(0x5B) || IsDown(0x5C) || IsDown(0x01) ||
-                IsDown(0x02) || IsDown(0x04) || IsDown(0x05) || IsDown(0x06) ||
-                (trigger.Keyboard != null && IsDown(trigger.Keyboard.Key));
+            return HeldInputs(trigger).Count > 0;
+        }
+
+        internal static List<string> HeldInputs(TriggerBinding trigger)
+        {
+            int[] keys = { 0x10, 0x11, 0x12, 0x5B, 0x5C, 0x01, 0x02, 0x04, 0x05, 0x06 };
+            string[] names = { "Shift", "Ctrl", "Alt", "Win", "Win", "left button", "right button",
+                "middle button", "back button", "forward button" };
+            List<string> held = new List<string>();
+            for (int i = 0; i < keys.Length; i++)
+                if (IsDown(keys[i]) && !held.Contains(names[i])) held.Add(names[i]);
+            if (trigger.Keyboard != null && IsDown(trigger.Keyboard.Key)) held.Add("trigger " + trigger.Keyboard.Display);
+            return held;
         }
 
         internal static uint CurrentModifiers()
@@ -439,6 +493,7 @@ namespace MD301Plus
         private int pendingAction = -1;
         private int pendingKey;
         private bool completed;
+        private bool pressReachedWindow;
 
         internal MenuInputCapture(Func<Point, int> hitTest, Action<int> hover, Action<int> complete, TriggerBinding trigger)
         {
@@ -463,11 +518,30 @@ namespace MD301Plus
 
         private IntPtr MouseCallback(int code, IntPtr message, IntPtr data)
         {
-            if (code < 0 || completed)
-                return Native.CallNextHookEx(mouseHook, code, message, data);
-            int kind = message.ToInt32();
-            Native.MouseHookData input = (Native.MouseHookData)Marshal.PtrToStructure(data, typeof(Native.MouseHookData));
-            int index = hitTest(new Point(input.Point.X, input.Point.Y));
+            if (code >= 0 && !completed)
+            {
+                Native.MouseHookData input = (Native.MouseHookData)Marshal.PtrToStructure(data, typeof(Native.MouseHookData));
+                if (Mouse(message.ToInt32(), new Point(input.Point.X, input.Point.Y), input.MouseData, true))
+                    return new IntPtr(1);
+            }
+            return Native.CallNextHookEx(mouseHook, code, message, data);
+        }
+
+        // Windows skips low-level hooks for input that arrives while this thread is busy for longer than
+        // LowLevelHooksTimeout (about 300 ms); those clicks reach the ring window itself instead.
+        internal void WindowMouse(int kind, Point screenPoint)
+        {
+            if (completed) return;
+            if (kind != 0x0200) Bypassed = true;
+            Mouse(kind, screenPoint, 0, false);
+        }
+
+        internal bool Bypassed { get; private set; }
+
+        // Returns true when the low-level hook should swallow the event.
+        internal bool Mouse(int kind, Point point, uint mouseData, bool fromHook)
+        {
+            int index = hitTest(point);
             if (kind == 0x0200)
             {
                 hover(index);
@@ -476,21 +550,24 @@ namespace MD301Plus
             {
                 pendingButton = kind == 0x0201 ? 1 : 2;
                 pendingAction = pendingButton == 1 ? index : -1;
-                return new IntPtr(1);
+                pressReachedWindow = !fromHook;
+                return true;
             }
             else if ((kind == 0x0202 && pendingButton == 1) || (kind == 0x0205 && pendingButton == 2))
             {
                 int selected = pendingAction >= 0 && pendingAction == index ? index : -1;
                 pendingButton = 0;
                 Finish(selected);
-                return new IntPtr(1);
+                // If Windows delivered the press, it must also see the release; otherwise it keeps the button
+                // held down and the action waits for a release that never comes.
+                return !pressReachedWindow;
             }
-            else if (Native.TriggerButton(kind, input.MouseData) != MouseButtonTrigger.None &&
-                Native.TriggerButton(kind, input.MouseData) != trigger.MouseButton && Native.IsTriggerButtonDown(kind))
+            else if (Native.TriggerButton(kind, mouseData) != MouseButtonTrigger.None &&
+                Native.TriggerButton(kind, mouseData) != trigger.MouseButton && Native.IsTriggerButtonDown(kind))
             {
                 Finish(-1);
             }
-            return Native.CallNextHookEx(mouseHook, code, message, data);
+            return false;
         }
 
         private IntPtr KeyboardCallback(int code, IntPtr message, IntPtr data)

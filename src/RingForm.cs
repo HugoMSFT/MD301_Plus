@@ -56,14 +56,13 @@ namespace MD301Plus
                     if (actions[i].Kind == "shortcut")
                     {
                         KeyboardShortcut shortcut = KeyboardShortcut.Parse(actions[i].Command, false);
-                        command = shortcut.Modifiers == 0 &&
-                            ((shortcut.Key >= 0xAD && shortcut.Key <= 0xB3) || shortcut.Key == 0xB5) ?
-                            "Media key" : shortcut.Display;
+                        command = shortcut.IsMediaKey ? "Media key" : shortcut.Display;
                     }
                     Text(graphics, command, small, secondary, new RectangleF(
                         bubble.X + 4 * scale, bubble.Y + 84 * scale, bubble.Width - 8 * scale, 16 * scale));
                 }
-                RectangleF core = new RectangleF(center.X - 59 * scale, center.Y - 59 * scale, 118 * scale, 118 * scale);
+                float hub = RingGeometry.HubRadius * scale;
+                RectangleF core = new RectangleF(center.X - hub, center.Y - hub, 2 * hub, 2 * hub);
                 graphics.FillEllipse(background, core);
                 graphics.DrawEllipse(border, core);
                 Text(graphics, "MD301 +", title, Theme.Text, new RectangleF(
@@ -196,8 +195,12 @@ namespace MD301Plus
             focusTimer = new Timer { Interval = 50 };
             focusTimer.Tick += delegate
             {
-                if (!preview && source != IntPtr.Zero && (!Native.IsWindow(source) || Native.GetForegroundWindow() != source))
-                    CloseMenu();
+                if (preview || source == IntPtr.Zero) return;
+                IntPtr foreground = Native.GetForegroundWindow();
+                if (Native.IsWindow(source) && foreground == source) return;
+                AppLog.Note("Closed the action ring: " + Native.Describe(foreground) + " replaced " +
+                    Native.Describe(source) + " in front.");
+                CloseMenu();
             };
         }
 
@@ -230,6 +233,14 @@ namespace MD301Plus
                 message.Result = new IntPtr(3);
                 return;
             }
+            int kind = message.Msg;
+            if (capture != null && (kind == 0x0200 || kind == 0x0201 || kind == 0x0202 || kind == 0x0204 || kind == 0x0205))
+            {
+                int position = unchecked((int)message.LParam.ToInt64());
+                Point client = new Point(unchecked((short)(position & 0xFFFF)), unchecked((short)((position >> 16) & 0xFFFF)));
+                capture.WindowMouse(kind, PointToScreen(client));
+                if (kind != 0x0200) return;
+            }
             base.WndProc(ref message);
         }
 
@@ -258,6 +269,11 @@ namespace MD301Plus
             {
                 capture.Start();
                 Show();
+                Native.BringToTopmost(Handle);
+                IntPtr cover;
+                if (MostlyHidden(out cover))
+                    throw new InvalidOperationException("Windows is showing " + Native.Describe(cover) +
+                        " above every app, so the action ring would be hidden. Close Start, Search or Task View, then try again.");
                 Invalidate();
                 focusTimer.Start();
             }
@@ -266,6 +282,33 @@ namespace MD301Plus
                 CloseMenu();
                 throw;
             }
+            catch (InvalidOperationException)
+            {
+                CloseMenu();
+                throw;
+            }
+        }
+
+        // Start, Search and Task View are drawn above every always-on-top window. A ring hidden under them
+        // would still capture the next click, so it is closed and reported instead.
+        private bool MostlyHidden(out IntPtr cover)
+        {
+            cover = IntPtr.Zero;
+            List<PointF> spots = new List<PointF> { geometry.Center };
+            for (int i = 0; i < RingGeometry.ActionCount; i++)
+            {
+                RectangleF bubble = geometry.Bubble(i);
+                spots.Add(new PointF(bubble.X + bubble.Width / 2, bubble.Y + bubble.Height / 2));
+            }
+            int hidden = 0;
+            foreach (PointF spot in spots)
+            {
+                IntPtr top = Native.TopLevelWindowAt(new Point(geometry.Bounds.Left + (int)spot.X, geometry.Bounds.Top + (int)spot.Y));
+                if (top == Handle) continue;
+                hidden++;
+                if (top != IntPtr.Zero) cover = top;
+            }
+            return hidden * 2 > spots.Count;
         }
 
         private void SetHovered(int index)
@@ -284,6 +327,8 @@ namespace MD301Plus
             BeginInvoke(new Action(delegate
             {
                 if (!Visible || generation != expectedGeneration) return;
+                if (capture != null && capture.Bypassed)
+                    AppLog.Note("A click on the action ring bypassed the mouse listener (MD301 Plus was busy); the ring handled it directly.");
                 RingAction action = index >= 0 ? settings.Actions[index] : null;
                 IntPtr target = source;
                 bool wasPreview = preview;
