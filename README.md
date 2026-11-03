@@ -50,6 +50,10 @@ receiver, the ring shows **--**.
 MD301 Plus keeps running in the notification area of the taskbar. To change your
 ring, open **MD301 Plus** from the Start menu.
 
+To check which version you have, look at the top-right corner of Settings, or
+point to the MD301 Plus icon in the notification area. Copies from the Store also
+say **(Microsoft Store)**.
+
 To use the small DPI button below the scroll wheel instead, follow the
 [one-time ASUS Gear Link setup](docs/GUIDE.md#assign-the-below-scroll-dpi-button).
 

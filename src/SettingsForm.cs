@@ -79,8 +79,9 @@ namespace MD301Plus
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
             Controls.Add(root);
-            TableLayoutPanel header = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
+            TableLayoutPanel header = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 2 };
             header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             header.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
             header.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             header.Controls.Add(new Label
@@ -93,6 +94,11 @@ namespace MD301Plus
                 Text = "Choose your button, then drag actions into place.",
                 Dock = DockStyle.Fill, ForeColor = Theme.Muted
             }, 0, 1);
+            header.Controls.Add(new Label
+            {
+                Name = "AppVersion", Text = AppInfo.DisplayVersion, AutoSize = true,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right, ForeColor = Theme.Muted
+            }, 1, 1);
             root.Controls.Add(header, 0, 0);
 
             TableLayoutPanel body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1 };

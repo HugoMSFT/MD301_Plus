@@ -5,7 +5,9 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -79,6 +81,7 @@ namespace MD301Plus.Tests
             {
                 TestShortcuts();
                 TestApplicationIcon();
+                TestVersion();
                 TestSettings(directory);
                 TestDiagnosticLog();
                 TestMouseBindings();
@@ -132,6 +135,42 @@ namespace MD301Plus.Tests
             using (Icon executable = Icon.ExtractAssociatedIcon(Application.ExecutablePath))
             using (Bitmap bitmap = executable.ToBitmap())
                 Check(bitmap.GetPixel(0, 0).A == 0, "Executable embeds the transparent mouse icon.");
+        }
+
+        private static void TestVersion()
+        {
+            Assembly assembly = typeof(AppInfo).Assembly;
+            string version = AppInfo.Version;
+            Check(Regex.IsMatch(version, @"^\d+\.\d+\.\d+$"), "The app shows a major.minor.patch version: " + version);
+            AssemblyFileVersionAttribute file = (AssemblyFileVersionAttribute)Attribute.GetCustomAttribute(
+                assembly, typeof(AssemblyFileVersionAttribute));
+            Check(file != null && file.Version == version + ".0",
+                "The Store package (file) version matches the version shown in the app plus .0");
+            Check(assembly.GetName().Version.ToString() == version + ".0", "The assembly version matches the version shown in the app");
+            Check(!ShellLauncher.IsPackaged && AppInfo.DisplayVersion == "Version " + version,
+                "A copy outside the Store shows its version without a Store label");
+            Check(AppInfo.FormatVersion(true) == "Version " + version + " (Microsoft Store)", "The Store copy says it came from the Store");
+            Check(AppInfo.TrayText("Middle button") == "MD301 Plus " + version + " - Middle button", "The tray tooltip shows the version");
+            string shortened = AppInfo.TrayText("Keyboard: " + new string('X', 80));
+            Check(shortened.Length == AppInfo.MaxTrayTextLength && shortened.StartsWith("MD301 Plus " + version + " - ") &&
+                shortened.EndsWith("..."), "A long tray tooltip is shortened to the Windows limit and keeps the version");
+            Console.WriteLine("PASS: version " + version + " matches the assembly, Store package, Settings and tray text");
+        }
+
+        private static void CheckHeaderFits(TableLayoutPanel header)
+        {
+            Label subtitle = (Label)header.GetControlFromPosition(0, 1);
+            Label version = (Label)header.GetControlFromPosition(1, 1);
+            Check(version.Name == "AppVersion" && version.Visible && version.Text == AppInfo.DisplayVersion,
+                "Settings shows the app version");
+            foreach (string text in new[] { AppInfo.FormatVersion(true), AppInfo.DisplayVersion })
+            {
+                version.Text = text;
+                header.PerformLayout();
+                Check(subtitle.PreferredWidth <= subtitle.Width, "The settings subtitle fits beside " + text);
+                Check(header.ClientRectangle.Contains(version.Bounds) && version.Width >= version.PreferredWidth &&
+                    version.Left >= subtitle.Right, text + " is fully visible beside the subtitle (bounds " + version.Bounds + ")");
+            }
         }
 
         private static void Throws<T>(Action action, string message) where T : Exception
@@ -620,6 +659,7 @@ namespace MD301Plus.Tests
                 TableLayoutPanel header = (TableLayoutPanel)layout.GetControlFromPosition(0, 0);
                 Label heading = (Label)header.GetControlFromPosition(0, 0);
                 Check(heading.Height >= heading.Font.Height, "The settings heading fits at the current display DPI");
+                CheckHeaderFits(header);
                 foreach (Control control in layout.Controls)
                 {
                     Label text = control as Label;
@@ -697,6 +737,7 @@ namespace MD301Plus.Tests
                     Control choice = form.Controls.Find(name, true)[0];
                     Check(choice.Parent.ClientRectangle.Contains(choice.Bounds), "The compact layout keeps " + name + " inside its group");
                 }
+                CheckHeaderFits(header);
                 using (Bitmap image = new Bitmap(form.ClientSize.Width, form.ClientSize.Height))
                 {
                     form.Controls[0].DrawToBitmap(image, new Rectangle(Point.Empty, image.Size));
@@ -1041,6 +1082,11 @@ namespace MD301Plus.Tests
             {
                 Application.DoEvents();
                 Check(!application.IsSettingsOpen, "A normal tray start keeps Settings closed");
+                ToolStripItem versionItem = application.TrayMenu.Items[0];
+                Check(versionItem.Text == AppInfo.DisplayVersion && !versionItem.Enabled &&
+                    application.TrayMenu.Items[1] is ToolStripSeparator, "The tray menu shows the app version first");
+                Check(application.TrayToolTip == AppInfo.TrayText(TriggerBinding.Parse(original.Trigger).Description),
+                    "The tray tooltip shows the version and the active trigger");
                 if (Native.GetForegroundWindow() != IntPtr.Zero)
                 {
                     application.ToggleRing();
@@ -1055,6 +1101,7 @@ namespace MD301Plus.Tests
                 Throws<Win32Exception>(delegate { probe.Register(oldTrigger); }, "Tray application owns its configured trigger");
                 application.PauseTriggerForSetup();
                 Check(application.ActiveBinding == null, "Pause the trigger while recording the DPI key in Gear Link");
+                Check(application.TrayToolTip == AppInfo.TrayText("paused for Gear Link setup"), "The paused tray tooltip keeps the version");
                 int pausedId = probe.Register(oldTrigger);
                 probe.Unregister(pausedId);
                 application.ResumeSavedTrigger();
@@ -1089,6 +1136,8 @@ namespace MD301Plus.Tests
                 application.ApplySettings(draft);
                 Check(store.Load().Trigger == "Mouse5" && application.ActiveBinding.MouseButton == MouseButtonTrigger.Forward,
                     "Saving switches from a keyboard trigger to a live native mouse binding");
+                Check(application.TrayToolTip == AppInfo.TrayText(TriggerBinding.Parse("Mouse5").Description),
+                    "The tray tooltip follows the saved trigger and keeps the version");
                 int freedKeyboard = probe.Register(nextTrigger);
                 probe.Unregister(freedKeyboard);
                 draft.Trigger = failedTrigger.Display;

@@ -85,6 +85,8 @@ namespace MD301Plus
         private bool disposed;
         internal TriggerBinding ActiveBinding { get { return registration == null ? null : registration.Binding; } }
         internal bool IsSettingsOpen { get { return editor != null && !editor.IsDisposed && editor.Visible; } }
+        internal string TrayToolTip { get { return tray.Text; } }
+        internal ContextMenuStrip TrayMenu { get { return trayMenu; } }
 
         internal RingApplication(bool openSettings, bool openPreview)
             : this(openSettings, openPreview, new SettingsStore(Path.Combine(AppLog.DirectoryPath, "settings.json")),
@@ -109,6 +111,8 @@ namespace MD301Plus
             executionTimer = new System.Windows.Forms.Timer { Interval = 20 };
             executionTimer.Tick += ExecutePending;
             trayMenu = new ContextMenuStrip();
+            trayMenu.Items.Add(new ToolStripMenuItem(AppInfo.DisplayVersion) { Name = "AppVersion", Enabled = false });
+            trayMenu.Items.Add(new ToolStripSeparator());
             trayMenu.Items.Add("Settings...", null, delegate { ShowSettings(); });
             trayMenu.Items.Add("Preview ring", null, delegate { ShowPreview(settings); });
             resumeMenu = new ToolStripMenuItem("Resume saved ring") { Enabled = false };
@@ -122,8 +126,8 @@ namespace MD301Plus
             trayMenu.Items.Add("Exit", null, delegate { ExitThread(); });
             tray = new NotifyIcon
             {
-                Icon = icon, Text = registration == null ? "MD301 Plus - trigger unavailable" :
-                    "MD301 Plus - " + TriggerBinding.Parse(settings.Trigger).Description,
+                Icon = icon, Text = AppInfo.TrayText(registration == null ? "trigger unavailable" :
+                    TriggerBinding.Parse(settings.Trigger).Description),
                 ContextMenuStrip = trayMenu, Visible = true
             };
             tray.DoubleClick += delegate { ShowSettings(); };
@@ -228,7 +232,7 @@ namespace MD301Plus
             registration = candidate;
             resumeMenu.Enabled = false;
             if (editor != null) editor.SetSetupPaused(false);
-            tray.Text = "MD301 Plus - " + newTrigger.Description;
+            tray.Text = AppInfo.TrayText(newTrigger.Description);
             if (changed && previous != null) previous.Dispose();
         }
 
@@ -240,7 +244,7 @@ namespace MD301Plus
             registration = null;
             resumeMenu.Enabled = true;
             if (editor != null) editor.SetSetupPaused(true);
-            tray.Text = "MD301 Plus - paused for Gear Link setup";
+            tray.Text = AppInfo.TrayText("paused for Gear Link setup");
         }
 
         internal void ResumeSavedTrigger()
@@ -249,7 +253,7 @@ namespace MD301Plus
             registration = new TriggerRegistration(TriggerBinding.Parse(settings.Trigger), ToggleRing);
             resumeMenu.Enabled = false;
             if (editor != null) editor.SetSetupPaused(false);
-            tray.Text = "MD301 Plus - " + registration.Binding.Description;
+            tray.Text = AppInfo.TrayText(registration.Binding.Description);
         }
 
         private void ChooseAction(RingAction action, IntPtr target, bool preview)
