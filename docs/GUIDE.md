@@ -46,6 +46,15 @@ Windows 10 version 1903 and later. It does not need administrator rights.
   `%LOCALAPPDATA%\MD301Plus` in case you reinstall. Delete that folder to remove
   them too.
 
+### Check your version
+
+Settings shows the running version in its top-right corner, for example
+**Version 1.0.6**. The notification-area icon shows it too: point to the icon,
+or right-click it to see the version at the top of its menu. A copy from the
+Microsoft Store adds **(Microsoft Store)**. Partner Center and
+**Settings > Apps > Installed apps** list a Store release with an extra `.0`, for
+example `1.0.6.0`; that is the same release as **Version 1.0.6**.
+
 ### Removing the Store app
 
 Open **Settings > Apps > Installed apps**, select **MD301 Plus**, and choose
@@ -445,8 +454,9 @@ shortcut event ordering, Windows input ABI layout, DPI/monitor-edge hit testing,
 actual ring-editor controls, nonce-protected drag/drop and position swapping,
 DPI selection persistence, native mouse-button capture/consumption,
 media key codes and real SendInput delivery, native hotkey registration/conflicts,
-transactional settings/binding rollback, full tray startup/shutdown, and a real
-non-activating overlay. It briefly displays inert settings and ring windows,
+transactional settings/binding rollback, full tray startup/shutdown, the version
+shown in Settings and the tray, and a real non-activating overlay. It briefly
+displays inert settings and ring windows,
 without sending shortcuts to the user's applications. Rendered previews are written to
 `bin\ring-preview.png`, `bin\media-ring-preview.png`, `bin\settings-preview.png`,
 `bin\settings-compact-preview.png`, `bin\mouse-guide-preview.png`, and
@@ -512,6 +522,7 @@ The Store version behaves slightly differently:
   private app-data folder, and Windows removes them when you uninstall it.
 - Launch actions are opened through Explorer, so the apps they start use your
   normal app data instead of the Store version's private copy.
+- The version in Settings and the tray menu ends with **(Microsoft Store)**.
 
 To publish MD301 Plus in the Microsoft Store:
 
@@ -565,7 +576,8 @@ signing program.
 To publish a release:
 
 1. In `src\AssemblyInfo.cs`, update all three version numbers, for example to
-   `1.0.2.0`, `1.0.2.0`, and `1.0.2`.
+   `1.0.2.0`, `1.0.2.0`, and `1.0.2`. The app shows the last one in Settings and
+   the tray, and the tests check that the other two match it with `.0` added.
 2. Merge the change to `main`.
 3. Tag that commit with the matching version and push the tag:
    `git tag v1.0.2` and then `git push origin v1.0.2`.
