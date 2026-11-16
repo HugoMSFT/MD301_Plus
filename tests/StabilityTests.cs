@@ -228,17 +228,16 @@ namespace MD301Plus.Tests
             }, "Input-thread startup errors reach the UI caller");
             Check(cleaned, "A failed hook installation still releases partially installed resources");
             bool reentered = false;
-            using (WindowsFormsSynchronizationContext ui = new WindowsFormsSynchronizationContext())
+            // Disposing this context would destroy WinForms' shared UI marshalling control.
+            WindowsFormsSynchronizationContext ui = new WindowsFormsSynchronizationContext();
+            ui.Post(delegate { reentered = true; }, null);
+            using (HookThread worker = new HookThread(delegate { Thread.Sleep(50); }, delegate { Thread.Sleep(50); }))
             {
-                ui.Post(delegate { reentered = true; }, null);
-                using (HookThread worker = new HookThread(delegate { Thread.Sleep(50); }, delegate { Thread.Sleep(50); }))
-                {
-                    Check(!reentered, "Starting an input thread does not pump queued UI actions");
-                    worker.Dispose();
-                    Check(!reentered, "Stopping an input thread cannot reenter ring creation or disposal");
-                }
-                PumpUntil(delegate { return reentered; }, "Queued UI work resumes after input-thread cleanup");
+                Check(!reentered, "Starting an input thread does not pump queued UI actions");
+                worker.Dispose();
+                Check(!reentered, "Stopping an input thread cannot reenter ring creation or disposal");
             }
+            PumpUntil(delegate { return reentered; }, "Queued UI work resumes after input-thread cleanup");
             Console.WriteLine("PASS: input-thread isolation through a UI stall, native callbacks and startup/shutdown cleanup");
         }
 
@@ -321,8 +320,8 @@ namespace MD301Plus.Tests
                     Throws<InvalidOperationException>(delegate { launcher.Open("https://example.com/again"); },
                         "Slow launches cannot build an unbounded queue of delayed actions");
                     bool responsive = false;
-                    using (WindowsFormsSynchronizationContext ui = new WindowsFormsSynchronizationContext())
-                        ui.Post(delegate { responsive = Thread.CurrentThread.ManagedThreadId == owner; }, null);
+                    WindowsFormsSynchronizationContext ui = new WindowsFormsSynchronizationContext();
+                    ui.Post(delegate { responsive = Thread.CurrentThread.ManagedThreadId == owner; }, null);
                     PumpUntil(delegate { return responsive; }, "The UI keeps processing work during a slow launch");
                     Check(apartment == ApartmentState.STA && completions == 0, "Shell work uses an STA worker without premature success");
                 }
