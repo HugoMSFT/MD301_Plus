@@ -341,7 +341,7 @@ namespace MD301Plus
             this.source = source;
             this.utcNow = utcNow ?? delegate { return DateTime.UtcNow; };
             reading = new BatteryReading(Unknown, BatteryRead.Pending, null, this.utcNow);
-            context = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+            context = new WindowsFormsSynchronizationContext();
             lastRefresh = Environment.TickCount - RefreshThrottleMs;
             timer = new System.Threading.Timer(delegate { Poll(); }, null,
                 poll ? 0 : Timeout.Infinite, poll ? PollMs : Timeout.Infinite);

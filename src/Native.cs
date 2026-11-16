@@ -534,7 +534,7 @@ namespace MD301Plus
             this.hover = hover;
             this.complete = complete;
             this.trigger = trigger;
-            context = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+            context = new WindowsFormsSynchronizationContext();
             ownerThread = Thread.CurrentThread.ManagedThreadId;
             mouseCallback = MouseCallback;
             keyboardCallback = KeyboardCallback;

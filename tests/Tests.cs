@@ -554,7 +554,13 @@ namespace MD301Plus.Tests
             using (MouseBattery monitor = new MouseBattery(delegate(out int percent) { percent = reading; return state; }, false))
             {
                 int changes = 0;
-                monitor.Changed += delegate { changes++; };
+                int uiThread = Thread.CurrentThread.ManagedThreadId;
+                bool changedOnUi = true;
+                monitor.Changed += delegate
+                {
+                    changes++;
+                    changedOnUi &= Thread.CurrentThread.ManagedThreadId == uiThread;
+                };
                 Check(monitor.Percent == MouseBattery.Unknown, "The battery starts unknown");
                 monitor.Poll();
                 PumpUntil(delegate { return changes == 1; }, "A battery change is reported on the UI thread");
@@ -576,6 +582,7 @@ namespace MD301Plus.Tests
                 monitor.Refresh();
                 Pump(100);
                 Check(monitor.Percent == 50, "Back-to-back refreshes are throttled");
+                Check(changedOnUi, "Every battery notification runs on its owning UI thread");
             }
 
             float full = 360 - 2 * RingPainter.BatteryGapDegrees;

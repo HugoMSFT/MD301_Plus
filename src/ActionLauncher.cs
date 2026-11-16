@@ -21,7 +21,7 @@ namespace MD301Plus
             this.launch = launch;
             this.completed = completed;
             this.exists = exists ?? delegate(string path) { return File.Exists(path) || Directory.Exists(path); };
-            context = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+            context = new WindowsFormsSynchronizationContext();
         }
 
         internal bool IsBusy { get { return Interlocked.CompareExchange(ref busy, 0, 0) != 0; } }

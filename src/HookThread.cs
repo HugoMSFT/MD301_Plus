@@ -17,7 +17,7 @@ namespace MD301Plus
 
         internal HookThread(Action install, Action release)
         {
-            owner = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+            owner = new WindowsFormsSynchronizationContext();
             Exception startupError = null;
             int ready = 0;
             thread = new Thread(delegate()
