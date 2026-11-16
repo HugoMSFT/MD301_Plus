@@ -8,9 +8,56 @@ using Microsoft.Win32.SafeHandles;
 
 namespace MD301Plus
 {
-    internal enum BatteryRead { Ok, Asleep, Missing }
+    internal enum BatteryRead { Ok, Asleep, Missing, Failed, Pending }
 
     internal delegate BatteryRead BatterySource(out int percent);
+
+    internal sealed class BatteryReading
+    {
+        private readonly Func<DateTime> utcNow;
+        internal int Percent { get; private set; }
+        internal BatteryRead State { get; private set; }
+        internal DateTime? UpdatedUtc { get; private set; }
+
+        internal BatteryReading(int percent, BatteryRead state, DateTime? updatedUtc, Func<DateTime> utcNow)
+        {
+            Percent = percent;
+            State = state;
+            UpdatedUtc = updatedUtc;
+            this.utcNow = utcNow;
+        }
+
+        internal bool IsCurrent
+        {
+            get
+            {
+                if (State != BatteryRead.Ok || !UpdatedUtc.HasValue) return false;
+                TimeSpan age = utcNow() - UpdatedUtc.Value;
+                return age >= TimeSpan.Zero && age < TimeSpan.FromMinutes(10);
+            }
+        }
+
+        internal string Readout
+        {
+            get { return Percent < 0 ? "--" : Percent + "%" + (IsCurrent ? "" : "*"); }
+        }
+
+        internal string Description
+        {
+            get
+            {
+                if (State == BatteryRead.Pending) return "Checking the MD301 battery level.";
+                string text = Percent < 0 ? "Mouse battery level unavailable." :
+                    "Mouse battery " + Percent + "%" + (IsCurrent ? "." : " (last known).");
+                if (UpdatedUtc.HasValue) text += " Last updated " + UpdatedUtc.Value.ToLocalTime().ToString("g") + ".";
+                if (State == BatteryRead.Missing) text += " No compatible MD301 USB connection was found.";
+                else if (State == BatteryRead.Asleep) text += " The mouse is asleep or not responding.";
+                else if (State == BatteryRead.Failed) text += " The last battery read failed.";
+                else if (!IsCurrent) text += " The battery reading is out of date.";
+                return text;
+            }
+        }
+    }
 
     // Reads the battery level through the ASUS vendor HID collection that Armoury Crate and Gear Link use.
     // Only the read-only "get battery" query (0x0712) is sent, and only to collections that name the MD301.
@@ -275,9 +322,10 @@ namespace MD301Plus
         private const int PollMs = 5 * 60 * 1000;
         private const int RefreshThrottleMs = 5000;
         private readonly BatterySource source;
+        private readonly Func<DateTime> utcNow;
         private readonly SynchronizationContext context;
         private readonly System.Threading.Timer timer;
-        private volatile int percent = Unknown;
+        private volatile BatteryReading reading;
         private volatile bool disposed;
         private int busy;
         private int lastRefresh;
@@ -288,16 +336,19 @@ namespace MD301Plus
         {
         }
 
-        internal MouseBattery(BatterySource source, bool poll)
+        internal MouseBattery(BatterySource source, bool poll, Func<DateTime> utcNow = null)
         {
             this.source = source;
-            context = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+            this.utcNow = utcNow ?? delegate { return DateTime.UtcNow; };
+            reading = new BatteryReading(Unknown, BatteryRead.Pending, null, this.utcNow);
+            context = new WindowsFormsSynchronizationContext();
             lastRefresh = Environment.TickCount - RefreshThrottleMs;
             timer = new System.Threading.Timer(delegate { Poll(); }, null,
                 poll ? 0 : Timeout.Infinite, poll ? PollMs : Timeout.Infinite);
         }
 
-        internal int Percent { get { return percent; } }
+        internal int Percent { get { return reading.Percent; } }
+        internal BatteryReading Reading { get { return reading; } }
 
         internal void Refresh()
         {
@@ -313,22 +364,37 @@ namespace MD301Plus
             {
                 int value;
                 BatteryRead result;
+                DateTime updated = DateTime.MinValue;
                 // This runs on a thread-pool thread: an escaped exception would end the whole app.
-                try { result = source(out value); }
+                try
+                {
+                    result = source(out value);
+                    if ((result != BatteryRead.Ok && result != BatteryRead.Asleep && result != BatteryRead.Missing) ||
+                        (result == BatteryRead.Ok && (value < 0 || value > 100)))
+                        throw new InvalidOperationException("The battery source returned an invalid reading.");
+                    updated = utcNow();
+                    loggedFailure = false;
+                }
                 catch (Exception error)
                 {
                     if (!loggedFailure) AppLog.Error("Battery read failed", error);
                     loggedFailure = true;
-                    result = BatteryRead.Missing;
+                    result = BatteryRead.Failed;
                     value = Unknown;
                 }
                 // A sleeping mouse keeps its last reading; an unplugged receiver clears it.
-                int next = result == BatteryRead.Ok ? value : result == BatteryRead.Missing ? Unknown : percent;
-                if (next == percent) return;
-                percent = next;
+                BatteryReading previous = reading;
+                int next = result == BatteryRead.Ok ? value : result == BatteryRead.Missing ? Unknown : previous.Percent;
+                DateTime? timestamp = result == BatteryRead.Ok ? updated :
+                    result == BatteryRead.Missing ? (DateTime?)null : previous.UpdatedUtc;
+                if (next == previous.Percent && result == previous.State && timestamp == previous.UpdatedUtc) return;
+                reading = new BatteryReading(next, result, timestamp, utcNow);
                 if (disposed) return;
                 try { context.Post(delegate { RaiseChanged(); }, null); }
-                catch (InvalidOperationException) { }
+                catch (InvalidOperationException error)
+                {
+                    if (!disposed) AppLog.Error("Dispatching battery status", error);
+                }
             }
             finally { Interlocked.Exchange(ref busy, 0); }
         }

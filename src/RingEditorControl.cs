@@ -55,12 +55,18 @@ namespace MD301Plus
 
     internal sealed class RingEditorControl : Control
     {
+        private const string EditorDescription =
+            "Drag an action from the palette onto a circle. Drag between circles to swap positions. Arrow keys select a position.";
         private readonly ActionDragSession drag;
+        private readonly ToolTip batteryTip = new ToolTip { InitialDelay = 350, AutoPopDelay = 10000 };
+        private readonly Timer freshnessTimer = new Timer { Interval = 1000 };
         private List<RingAction> actions;
         private Point downPoint;
         private int downSlot = -1;
         private int dropSlot = -1;
         private int battery = MouseBattery.Unknown;
+        private BatteryReading batteryStatus;
+        private bool batteryCurrent = true;
         internal int SelectedSlot { get; private set; }
         internal event Action Changed;
         internal event Action SelectionChanged;
@@ -71,10 +77,41 @@ namespace MD301Plus
             get { return battery; }
             set
             {
-                if (battery == value) return;
+                if (battery == value && batteryStatus == null) return;
                 battery = value;
+                batteryStatus = null;
+                batteryCurrent = true;
+                freshnessTimer.Stop();
+                batteryTip.SetToolTip(this, "");
+                AccessibleDescription = EditorDescription + " " + RingPainter.BatteryDescription(battery);
                 Invalidate();
             }
+        }
+
+        internal BatteryReading BatteryStatus
+        {
+            get { return batteryStatus; }
+            set
+            {
+                batteryStatus = value;
+                battery = value == null ? MouseBattery.Unknown : value.Percent;
+                batteryCurrent = value == null || value.IsCurrent;
+                if (value != null && Visible) freshnessTimer.Start(); else freshnessTimer.Stop();
+                AccessibleDescription = EditorDescription + " " +
+                    (value == null ? RingPainter.BatteryDescription(battery) : value.Description);
+                if (batteryTip.GetToolTip(this).Length > 0) batteryTip.SetToolTip(this, value == null ? "" : value.Description);
+                Invalidate();
+            }
+        }
+
+        internal void RefreshBatteryStatus()
+        {
+            bool current = batteryStatus == null || batteryStatus.IsCurrent;
+            if (current == batteryCurrent) return;
+            batteryCurrent = current;
+            AccessibleDescription = EditorDescription + " " + batteryStatus.Description;
+            if (batteryTip.GetToolTip(this).Length > 0) batteryTip.SetToolTip(this, batteryStatus.Description);
+            Invalidate();
         }
 
         internal RingEditorControl(ActionDragSession drag, IList<RingAction> values)
@@ -86,7 +123,8 @@ namespace MD301Plus
             AllowDrop = true;
             TabStop = true;
             AccessibleName = "Eight-position action ring editor";
-            AccessibleDescription = "Drag an action from the palette onto a circle. Drag between circles to swap positions. Arrow keys select a position.";
+            AccessibleDescription = EditorDescription;
+            freshnessTimer.Tick += delegate { RefreshBatteryStatus(); };
             SetActions(values);
         }
 
@@ -201,13 +239,20 @@ namespace MD301Plus
             base.OnPaint(e);
             RingGeometry geometry = Geometry();
             e.Graphics.TranslateTransform(geometry.Bounds.Left, geometry.Bounds.Top);
-            RingPainter.Draw(e.Graphics, geometry, actions, dropSlot >= 0 ? dropSlot : SelectedSlot, false, true, battery);
+            RingPainter.Draw(e.Graphics, geometry, actions, dropSlot >= 0 ? dropSlot : SelectedSlot, false, true, battery, batteryStatus);
         }
 
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
             Invalidate();
+        }
+
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (freshnessTimer == null) return;
+            if (Visible && batteryStatus != null) freshnessTimer.Start(); else freshnessTimer.Stop();
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -222,6 +267,8 @@ namespace MD301Plus
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            string tip = batteryStatus != null && Geometry().IsOnBatteryGauge(e.Location) ? batteryStatus.Description : "";
+            if (batteryTip.GetToolTip(this) != tip) batteryTip.SetToolTip(this, tip);
             if (downSlot < 0 || e.Button != MouseButtons.Left) return;
             Size threshold = SystemInformation.DragSize;
             if (Math.Abs(e.X - downPoint.X) < threshold.Width / 2 &&
@@ -303,6 +350,16 @@ namespace MD301Plus
             }
             if (e.KeyCode == Keys.Enter) { RequestEdit(); e.Handled = true; }
             base.OnKeyDown(e);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                freshnessTimer.Dispose();
+                batteryTip.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 
@@ -434,10 +491,11 @@ namespace MD301Plus
             base.OnDoubleClick(e);
         }
 
-        protected override void OnKeyDown(KeyEventArgs e)
+        protected override bool ProcessCmdKey(ref Message message, Keys keyData)
         {
-            if (e.KeyCode == Keys.Enter) { AssignSelected(); e.Handled = true; }
-            base.OnKeyDown(e);
+            if (keyData != Keys.Enter) return base.ProcessCmdKey(ref message, keyData);
+            AssignSelected();
+            return true;
         }
 
         private void AssignSelected()

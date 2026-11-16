@@ -13,6 +13,7 @@ namespace MD301Plus
     internal static class AppLog
     {
         private const long MaxBytes = 512 * 1024;
+        private static readonly object writeLock = new object();
         internal static readonly string DirectoryPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MD301Plus");
         // Tests redirect this so they never write to the user's log.
@@ -30,6 +31,11 @@ namespace MD301Plus
         }
 
         private static string Write(string entry)
+        {
+            lock (writeLock) return WriteLocked(entry);
+        }
+
+        private static string WriteLocked(string entry)
         {
             try
             {
@@ -74,6 +80,7 @@ namespace MD301Plus
         private readonly SettingsRequestWindow settingsRequests;
         private readonly LifetimeWindow lifetime;
         private readonly MouseBattery battery;
+        private readonly ActionLauncher launcher;
         private readonly Stopwatch wait = new Stopwatch();
         private readonly Stopwatch sinceOpened = new Stopwatch();
         internal const int RepeatTriggerMilliseconds = 250;
@@ -100,6 +107,10 @@ namespace MD301Plus
             bool firstRun = !File.Exists(store.FilePath);
             settings = store.Load();
             if (firstRun) store.Save(settings);
+            launcher = new ActionLauncher(delegate(Exception error)
+            {
+                if (error != null) ReportActionError("Action failed", error);
+            });
             Win32Exception registrationError = null;
             try { registration = new TriggerRegistration(TriggerBinding.Parse(settings.Trigger), ToggleRing); }
             catch (Win32Exception ex) { registrationError = ex; }
@@ -165,6 +176,7 @@ namespace MD301Plus
             bool editorFocused = editor != null && editor.ContainsFocus;
             if (editorFocused) editor.NotifyTriggerReceived();
             battery.Refresh();
+            ShowBattery();
             try
             {
                 ring.ShowMenu(settings, target, editorFocused);
@@ -176,14 +188,15 @@ namespace MD301Plus
 
         private void ShowBattery()
         {
-            ring.BatteryPercent = battery.Percent;
-            if (editor != null && !editor.IsDisposed) editor.RingEditor.BatteryPercent = battery.Percent;
+            ring.BatteryStatus = battery.Reading;
+            if (editor != null && !editor.IsDisposed) editor.RingEditor.BatteryStatus = battery.Reading;
         }
 
         private void ShowPreview(RingSettings draft)
         {
             CancelPending();
             battery.Refresh();
+            ShowBattery();
             sinceOpened.Reset();
             try { ring.ShowMenu(draft, Native.GetForegroundWindow(), true,
                 registration == null ? TriggerBinding.Parse(settings.Trigger) : registration.Binding); }
@@ -199,7 +212,7 @@ namespace MD301Plus
             {
                 editor = new SettingsForm(settings, ApplySettings, ShowPreview, PauseTriggerForSetup, ResumeSavedTrigger, resumeMenu.Enabled);
                 editor.Icon = icon;
-                editor.RingEditor.BatteryPercent = battery.Percent;
+                editor.RingEditor.BatteryStatus = battery.Reading;
                 editor.FormClosed += delegate { editor = null; ring.CloseMenu(); };
                 editor.Show();
                 battery.Refresh();
@@ -211,11 +224,17 @@ namespace MD301Plus
             }
         }
 
+        internal void ShowRecoveryNotice(string preservedFile)
+        {
+            ShowSettings();
+            editor.ShowRecoveryNotice(preservedFile);
+        }
+
         internal void ApplySettings(RingSettings next)
         {
             next.Validate();
             TriggerBinding newTrigger = TriggerBinding.Parse(next.Trigger);
-            bool changed = registration == null || !newTrigger.SameAs(registration.Binding);
+            bool changed = registration == null || !registration.IsActive || !newTrigger.SameAs(registration.Binding);
             TriggerRegistration candidate = changed ? new TriggerRegistration(newTrigger, ToggleRing) : registration;
             bool saved = false;
             try
@@ -304,13 +323,7 @@ namespace MD301Plus
                 }
                 else
                 {
-                    RingAction.ValidateLaunchTarget(action.Command);
-                    Uri url;
-                    bool web = Uri.TryCreate(action.Command, UriKind.Absolute, out url) &&
-                        (url.Scheme == Uri.UriSchemeHttp || url.Scheme == Uri.UriSchemeHttps);
-                    if (!web && !File.Exists(action.Command) && !Directory.Exists(action.Command))
-                        throw new FileNotFoundException("The launch target does not exist: " + action.Command);
-                    ShellLauncher.Open(action.Command);
+                    launcher.Open(action.Command);
                 }
             }
             catch (Win32Exception ex) { ReportActionError("Action failed", ex); }
@@ -355,6 +368,7 @@ namespace MD301Plus
             if (disposing && !disposed)
             {
                 disposed = true;
+                launcher.Dispose();
                 battery.Dispose();
                 lifetime.Dispose();
                 settingsRequests.Dispose();
@@ -404,8 +418,30 @@ namespace MD301Plus
                 }
                 try
                 {
-                    using (RingApplication context = new RingApplication(openSettings, openPreview))
+                    SettingsStore store = new SettingsStore(Path.Combine(AppLog.DirectoryPath, "settings.json"));
+                    bool recovered = false;
+                    string preservedFile = null;
+                    try { store.Load(); }
+                    catch (SettingsException error)
+                    {
+                        using (SettingsRecoveryForm recovery = new SettingsRecoveryForm(store, error))
+                        using (SettingsRequestWindow requests = new SettingsRequestWindow(SettingsRequestWindow.DefaultName, delegate
+                        {
+                            if (recovery.WindowState == FormWindowState.Minimized) recovery.WindowState = FormWindowState.Normal;
+                            recovery.Activate();
+                        }))
+                        {
+                            if (recovery.ShowDialog() != DialogResult.OK) return 1;
+                            recovered = true;
+                            preservedFile = recovery.PreservedFile;
+                        }
+                        openSettings = true;
+                    }
+                    using (RingApplication context = new RingApplication(openSettings, openPreview, store, SettingsRequestWindow.DefaultName))
+                    {
+                        if (recovered) context.ShowRecoveryNotice(preservedFile);
                         Application.Run(context);
+                    }
                     return 0;
                 }
                 catch (SettingsException ex) { AppLog.ShowError(null, "Cannot start", ex); return 1; }

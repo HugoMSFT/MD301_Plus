@@ -16,22 +16,34 @@ namespace MD301Plus
 
         internal static void Open(string target)
         {
-            if (IsPackaged)
+            Open(target, IsPackaged, OpenThroughDesktop, OpenDirect);
+        }
+
+        internal static void Open(string target, bool isPackaged, Action<string, int> desktop, Action<string> direct)
+        {
+            if (isPackaged)
             {
                 // Processes started by a Store (MSIX) app inherit its private AppData and registry redirection,
                 // so ask Explorer to open the target exactly as if it was opened from Start.
                 try
                 {
-                    OpenThroughDesktop(target, ShowNormal);
+                    desktop(target, ShowNormal);
                     return;
                 }
                 catch (Exception ex)
                 {
                     if (!IsDesktopLaunchFailure(ex)) throw;
-                    AppLog.Error("Explorer could not open " + target + "; MD301 Plus opened it directly", ex);
+                    throw new InvalidOperationException(
+                        "Windows Explorer could not open the target. Try again after Explorer is available. " +
+                        "MD301 Plus did not open it directly, to avoid using a private Store app profile.", ex);
                 }
             }
-            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+            direct(target);
+        }
+
+        private static void OpenDirect(string target)
+        {
+            using (Process process = Process.Start(new ProcessStartInfo(target) { UseShellExecute = true })) { }
         }
 
         internal static void OpenThroughDesktop(string target, int show)

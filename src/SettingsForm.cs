@@ -14,6 +14,7 @@ namespace MD301Plus
         private readonly Action<RingSettings> preview;
         private readonly Action pauseForSetup;
         private readonly Action resumeAfterSetup;
+        private readonly ActionLauncher launcher;
         private readonly ActionDragSession drag = new ActionDragSession();
         private readonly RadioButton[] sourceChoices;
         private readonly TextBox dpiKey;
@@ -35,6 +36,7 @@ namespace MD301Plus
         private string currentCategory = "Productivity";
         private bool dirty;
         private bool initializing = true;
+        private bool pausedForLaunch;
         private string savedTrigger;
         internal bool IsCapturingButton { get; private set; }
         internal bool IsSetupPaused { get; private set; }
@@ -50,13 +52,14 @@ namespace MD301Plus
         internal RingEditorControl RingEditor { get { return ring; } }
 
         internal SettingsForm(RingSettings settings, Action<RingSettings> save, Action<RingSettings> preview,
-            Action pauseForSetup = null, Action resumeAfterSetup = null, bool setupPaused = false)
+            Action pauseForSetup = null, Action resumeAfterSetup = null, bool setupPaused = false, Action<string> openLink = null)
         {
             settings.Validate();
             this.save = save;
             this.preview = preview;
             this.pauseForSetup = pauseForSetup;
             this.resumeAfterSetup = resumeAfterSetup;
+            launcher = openLink == null ? new ActionLauncher(GearLinkOpened) : new ActionLauncher(openLink, GearLinkOpened);
             savedTrigger = settings.Trigger;
             SuspendLayout();
             Text = "MD301 Plus - Your action ring";
@@ -175,6 +178,7 @@ namespace MD301Plus
             };
             assignment.Controls.Add(instructions);
             setup = Button("Open Gear Link...", false);
+            setup.Name = "OpenGearLink";
             setup.Width = 228;
             setup.Click += delegate { OpenGearLink(); };
             assignment.Controls.Add(setup);
@@ -505,6 +509,14 @@ namespace MD301Plus
             status.Text = "Saved trigger received (" + savedTrigger + "). Showing a safe preview of your ring.";
         }
 
+        internal void ShowRecoveryNotice(string preservedFile)
+        {
+            status.Text = "Settings recovered. Choose and save a trigger to enable the ring." +
+                (preservedFile == null ? "" : " Original file: " + preservedFile);
+            status.AccessibleDescription = status.Text;
+            AppLog.Note(status.Text);
+        }
+
         private void Preview()
         {
             try { preview(ReadSettings()); }
@@ -516,26 +528,69 @@ namespace MD301Plus
         {
             try
             {
-                ShellLauncher.Open("https://gearlink.asus.com/en");
-                if (pauseForSetup != null)
+                if (launcher.IsBusy)
+                {
+                    status.Text = "Gear Link is already opening.";
+                    return;
+                }
+                pausedForLaunch = pauseForSetup != null && !IsSetupPaused;
+                if (pausedForLaunch)
                 {
                     pauseForSetup();
                     SetSetupPaused(true);
                 }
-                else status.Text = "Map the DPI button in Gear Link, return here, and save changes.";
+                launcher.Open("https://gearlink.asus.com/en");
+                setup.Enabled = false;
             }
-            catch (Win32Exception ex) { AppLog.ShowError(this, "Cannot open Gear Link", ex); }
-            catch (InvalidOperationException ex) { AppLog.ShowError(this, "Cannot open Gear Link", ex); }
+            catch (Win32Exception ex) { GearLinkFailed(ex); }
+            catch (InvalidOperationException ex) { GearLinkFailed(ex); }
+        }
+
+        private void GearLinkOpened(Exception error)
+        {
+            setup.Enabled = true;
+            if (error != null)
+            {
+                GearLinkFailed(error);
+                return;
+            }
+            pausedForLaunch = false;
+            if (IsSetupPaused)
+                status.Text = "Gear Link opened. The ring is paused; finish the mapping, then save or close to resume.";
+            else if (pauseForSetup == null)
+                status.Text = "Map the DPI button in Gear Link, return here, and save changes.";
+        }
+
+        private void GearLinkFailed(Exception error)
+        {
+            if (pausedForLaunch && IsSetupPaused && resumeAfterSetup != null)
+            {
+                try
+                {
+                    resumeAfterSetup();
+                    SetSetupPaused(false);
+                    status.Text = "Gear Link could not open. The saved ring has resumed.";
+                }
+                catch (Win32Exception resumeError)
+                {
+                    status.Text = "Gear Link could not open. The ring remains paused; choose Resume saved ring in the tray.";
+                    AppLog.Error("Resuming after a failed Gear Link launch", resumeError);
+                }
+            }
+            pausedForLaunch = false;
+            AppLog.ShowError(this, "Cannot open Gear Link", error);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && launcher != null) launcher.Dispose();
+            base.Dispose(disposing);
         }
 
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            Rectangle area = Screen.FromControl(this).WorkingArea;
-            MinimumSize = new Size(Math.Min(MinimumSize.Width, area.Width), Math.Min(MinimumSize.Height, area.Height));
-            Size = new Size(Math.Min(Width, area.Width), Math.Min(Height, area.Height));
-            Location = new Point(Math.Max(area.Left, Math.Min(Left, area.Right - Width)),
-                Math.Max(area.Top, Math.Min(Top, area.Bottom - Height)));
+            Theme.FitToWorkingArea(this);
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)

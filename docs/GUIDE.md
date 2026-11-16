@@ -116,7 +116,8 @@ Other button -> Gear Link keyboard mapping -> F8 +-> Windows tray companion
 
 **MD301 Plus runs the overlay on Windows**. Direct assignment needs no Gear Link.
 Gear Link remains an optional way to configure buttons Windows cannot see.
-The app does not flash firmware, send undocumented HID commands, or require an
+The app does not flash firmware or send commands that change mouse settings.
+Its battery gauge uses a read-only ASUS vendor query. It does not require an
 ASUS SDK, Armoury Crate, Logi Options+, a browser tab, or administrator access.
 The optional single-key F8 mapping avoids requiring an ASUS companion; modified
 keyboard combinations in Gear Link may need one. Nothing is assigned until you
@@ -398,6 +399,10 @@ requirements still apply, such as enabling clipboard history.
   Button capture temporarily listens for Back/Forward/middle clicks, without
   changing the saved assignment. Menu selection listeners run only while the
   ring is visible; keyboard-only mode has no persistent mouse listener.
+  Low-level listeners have their own message-loop threads, so editing, saving,
+  or opening an app cannot stall them. Application launches and Gear Link
+  browser requests run on background STA threads; a slow launch does not queue
+  more delayed launches or freeze the editor.
   There is no key history, telemetry, network service, or firmware modification.
   The app itself writes no registry keys. The installer adds the Start menu
   shortcut, the Installed apps entry, and the optional sign-in entry under
@@ -407,8 +412,13 @@ requirements still apply, such as enabling clipboard history.
   installer entries: Windows manages its Start menu entry, sign-in startup task,
   and uninstall (see [Microsoft Store package](#microsoft-store-package)).
 - Settings are stored in `%LOCALAPPDATA%\MD301Plus\settings.json`. Saves are
-  validated and atomically replace the file. Invalid JSON is reported and left
-  untouched rather than silently resetting your actions. Exit the app before
+  validated and atomically replace the file, keeping the previous saved settings
+  in `settings.json.bak`. Invalid settings are never silently reset. At startup,
+  a recovery window lets you restore a valid backup or use default actions;
+  Cancel exits without changing the file. Recovery keeps the original bytes in
+  a uniquely named `settings.json.damaged-*.json` file, preserves the existing
+  backup, and leaves the trigger unassigned until you choose and save one.
+  Exit the app before
   manually editing the file. The `trigger` accepts `None`, `Mouse4`, `Mouse5`,
   `MiddleMouse`, or a keyboard shortcut; existing version-1 keyboard settings
   remain compatible. Optional `button` metadata remembers an explicit DPI or
@@ -418,8 +428,8 @@ requirements still apply, such as enabling clipboard history.
   opens so you can choose another one. Windows-reserved shortcuts may also fail.
   Do Not Disturb can hide tray notifications, so the log also records silent
   events: a ring closed because another app came to the front, a canceled
-  action and why, an ignored repeated trigger, and a click that bypassed the
-  menu listener while the app was busy. It records app process and window class
+  action and why, an ignored repeated trigger, and a click delivered directly
+  to the ring instead of through the menu listener. It records app process and window class
   names, never window titles. The log is capped at about 512 KB, plus one older
   copy (`app.log.old`).
 - Elevated applications, UAC/secure desktops, games, and apps that reject
@@ -434,8 +444,16 @@ requirements still apply, such as enabling clipboard history.
   every five minutes while it runs. It sends only the read-only ASUS battery
   query (`0x12 0x07`) to the MD301's vendor HID interface (tested with the ASUS
   USB receiver); it never sends commands that change mouse settings.
-  A sleeping mouse keeps its last reading. If no MD301 answers, for example
+  A sleeping or unresponsive mouse keeps only its last-known reading, shown
+  with an asterisk and a muted gauge. A reading is also marked stale after ten
+  minutes without a successful update. Hover over the gauge, in either the
+  editor or the live ring, for the status and last successful update time.
+  Read errors are reported separately from an absent compatible receiver.
+  If no MD301 connection is found, for example
   with the receiver unplugged, the gauge is empty and shows **--**.
+  Other mice can use the shortcut ring, but this battery reader supports only
+  the MD301's compatible ASUS USB connection; it does not guess another
+  device's battery level.
 
 ## Development
 
@@ -455,7 +473,13 @@ actual ring-editor controls, nonce-protected drag/drop and position swapping,
 DPI selection persistence, native mouse-button capture/consumption,
 media key codes and real SendInput delivery, native hotkey registration/conflicts,
 transactional settings/binding rollback, full tray startup/shutdown, the version
-shown in Settings and the tray, and a real non-activating overlay. It briefly
+shown in Settings and the tray, and a real non-activating overlay.
+Stability regressions also cover concurrent logging, backup/recovery failures,
+palette Enter routing, native hooks during a UI stall, cross-thread menu
+dispatch, slow/failed launches, shutdown cancellation, Store launch isolation,
+partial input delivery and modifier cleanup, and battery freshness/reconnects.
+The native stall check uses paired one-pixel mouse moves without clicks or
+scrolls. The suite briefly
 displays inert settings and ring windows,
 without sending shortcuts to the user's applications. Rendered previews are written to
 `bin\ring-preview.png`, `bin\media-ring-preview.png`, `bin\settings-preview.png`,
@@ -522,6 +546,9 @@ The Store version behaves slightly differently:
   private app-data folder, and Windows removes them when you uninstall it.
 - Launch actions are opened through Explorer, so the apps they start use your
   normal app data instead of the Store version's private copy.
+  If Explorer cannot open a target, MD301 Plus reports the failure instead of
+  silently launching it with a different private profile. Retry when Explorer
+  is available.
 - The version in Settings and the tray menu ends with **(Microsoft Store)**.
 
 To publish MD301 Plus in the Microsoft Store:
