@@ -109,7 +109,7 @@ try {
     Assert ($entries[0].GetValue('DisplayVersion') -eq $productVersion) "the Installed apps entry shows version $productVersion"
     Assert ($entries[0].GetValue('Publisher') -eq 'HugoMSFT') 'the Installed apps entry shows the publisher'
     Assert (([string]$entries[0].GetValue('InstallLocation')).TrimEnd('\') -eq $installDir) 'installs per user without administrator rights'
-    Assert ((Get-RunValue) -eq ('"{0}"' -f $installedExe)) 'the sign-in option starts the installed app'
+    Assert ((Get-RunValue) -eq ('"{0}" --startup' -f $installedExe)) 'the sign-in option starts the installed app quietly'
 
     $app = Start-App @('--settings')
     $null = Wait-For { $app.HasExited -or (Test-SettingsOpen $app) }
@@ -117,7 +117,11 @@ try {
     $null = $app.CloseMainWindow()
     $null = Wait-For { $app.Refresh(); $app.HasExited -or $app.MainWindowHandle -eq [IntPtr]::Zero }
     Assert (-not $app.HasExited -and $app.MainWindowHandle -eq [IntPtr]::Zero) 'closing Settings keeps the app running in the notification area'
-    $quiet = Start-App @('--startup')
+    $startupCommand = [string](Get-RunValue)
+    Assert ($startupCommand -match '^"([^"]+)" (--startup)$') 'the registered sign-in command includes --startup'
+    $quiet = Start-Process -FilePath $Matches[1] -ArgumentList $Matches[2] -PassThru
+    $null = $quiet.Handle
+    $started.Add($quiet)
     Assert ($quiet.WaitForExit(15000)) 'a sign-in launch exits when the app is already running'
     Assert ($quiet.ExitCode -eq 0) "the sign-in launch exits cleanly (exit code $($quiet.ExitCode))"
     Start-Sleep -Seconds 1

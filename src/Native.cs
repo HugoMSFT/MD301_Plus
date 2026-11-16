@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace MD301Plus
@@ -80,6 +81,7 @@ namespace MD301Plus
         }
 
         internal delegate IntPtr HookCallback(int code, IntPtr message, IntPtr data);
+        internal delegate uint InputSender(uint count, Input[] inputs, int inputSize);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -244,8 +246,11 @@ namespace MD301Plus
         private readonly MouseButtonTrigger button;
         private readonly Action<MouseButtonTrigger> triggered;
         private readonly Native.HookCallback callback;
+        private readonly object stateLock = new object();
+        private HookThread worker;
         private IntPtr hook;
         private MouseButtonTrigger pressed;
+        private volatile bool disposed;
 
         internal MouseButtonListener(MouseButtonTrigger button, Action<MouseButtonTrigger> triggered)
         {
@@ -258,16 +263,22 @@ namespace MD301Plus
         internal void Start()
         {
             if (Handle == IntPtr.Zero) throw new ObjectDisposedException("MouseButtonListener");
-            if (hook != IntPtr.Zero) throw new InvalidOperationException("The mouse-button listener is already running.");
-            hook = Native.SetWindowsHookEx(14, callback, Native.GetModuleHandle(null), 0);
-            if (hook == IntPtr.Zero)
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot listen for the assigned mouse button.");
+            if (worker != null) throw new InvalidOperationException("The mouse-button listener is already running.");
+            worker = new HookThread(delegate
+            {
+                hook = Native.SetWindowsHookEx(14, callback, Native.GetModuleHandle(null), 0);
+                if (hook == IntPtr.Zero)
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot listen for the assigned mouse button.");
+            }, ReleaseHook);
         }
+
+        internal bool IsRunning { get { return worker != null && worker.IsRunning; } }
 
         private IntPtr MouseCallback(int code, IntPtr message, IntPtr data)
         {
+            if (code < 0) return Native.CallNextHookEx(hook, code, message, data);
             int kind = message.ToInt32();
-            if (code >= 0 && (kind == 0x0207 || kind == 0x0208 || kind == 0x020B || kind == 0x020C))
+            if (kind == 0x0207 || kind == 0x0208 || kind == 0x020B || kind == 0x020C)
             {
                 Native.MouseHookData input = (Native.MouseHookData)Marshal.PtrToStructure(data, typeof(Native.MouseHookData));
                 if (ProcessMouseEvent(kind, input.MouseData)) return new IntPtr(1);
@@ -277,25 +288,32 @@ namespace MD301Plus
 
         internal bool ProcessMouseEvent(int message, uint mouseData)
         {
-            MouseButtonTrigger current = Native.TriggerButton(message, mouseData);
-            if (current == MouseButtonTrigger.None || (button != MouseButtonTrigger.None && current != button))
-                return false;
-            if (Native.IsTriggerButtonDown(message))
+            lock (stateLock)
             {
-                pressed = current;
+                if (disposed) return false;
+                MouseButtonTrigger current = Native.TriggerButton(message, mouseData);
+                if (current == MouseButtonTrigger.None || (button != MouseButtonTrigger.None && current != button))
+                    return false;
+                if (Native.IsTriggerButtonDown(message))
+                {
+                    pressed = current;
+                }
+                else if (pressed == current)
+                {
+                    pressed = MouseButtonTrigger.None;
+                    if (!Native.PostMessage(Handle, ClickMessage, new IntPtr((int)current), IntPtr.Zero))
+                    {
+                        Win32Exception error = new Win32Exception(Marshal.GetLastWin32Error());
+                        ThreadPool.QueueUserWorkItem(delegate { AppLog.Error("Dispatching a mouse-button trigger", error); });
+                    }
+                }
+                return true;
             }
-            else if (pressed == current)
-            {
-                pressed = MouseButtonTrigger.None;
-                if (!Native.PostMessage(Handle, ClickMessage, new IntPtr((int)current), IntPtr.Zero))
-                    AppLog.Error("Dispatching a mouse-button trigger", new Win32Exception(Marshal.GetLastWin32Error()));
-            }
-            return true;
         }
 
         protected override void WndProc(ref Message message)
         {
-            if (message.Msg == ClickMessage)
+            if (message.Msg == ClickMessage && !disposed)
             {
                 triggered((MouseButtonTrigger)message.WParam.ToInt32());
                 return;
@@ -303,11 +321,18 @@ namespace MD301Plus
             base.WndProc(ref message);
         }
 
-        public void Dispose()
+        private void ReleaseHook()
         {
             if (hook != IntPtr.Zero && !Native.UnhookWindowsHookEx(hook))
                 AppLog.Error("Releasing the assigned mouse button", new Win32Exception(Marshal.GetLastWin32Error()));
             hook = IntPtr.Zero;
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            if (worker != null) worker.Dispose();
             if (Handle != IntPtr.Zero) DestroyHandle();
             GC.KeepAlive(callback);
         }
@@ -318,6 +343,7 @@ namespace MD301Plus
         private HotkeyWindow keyboard;
         private MouseButtonListener mouse;
         internal TriggerBinding Binding { get; private set; }
+        internal bool IsActive { get { return !Binding.IsAssigned || keyboard != null || (mouse != null && mouse.IsRunning); } }
 
         internal TriggerRegistration(TriggerBinding binding, Action triggered)
         {
@@ -487,12 +513,19 @@ namespace MD301Plus
         private readonly Action<int> hover;
         private readonly Action<int> complete;
         private readonly TriggerBinding trigger;
+        private readonly SynchronizationContext context;
+        private readonly int ownerThread;
+        private readonly object stateLock = new object();
+        private HookThread worker;
         private IntPtr mouseHook;
         private IntPtr keyboardHook;
         private int pendingButton;
         private int pendingAction = -1;
         private int pendingKey;
-        private bool completed;
+        private volatile bool completed;
+        private volatile bool disposed;
+        private volatile bool bypassed;
+        private int lastHovered = Int32.MinValue;
         private bool pressReachedWindow;
 
         internal MenuInputCapture(Func<Point, int> hitTest, Action<int> hover, Action<int> complete, TriggerBinding trigger)
@@ -501,19 +534,26 @@ namespace MD301Plus
             this.hover = hover;
             this.complete = complete;
             this.trigger = trigger;
+            context = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+            ownerThread = Thread.CurrentThread.ManagedThreadId;
             mouseCallback = MouseCallback;
             keyboardCallback = KeyboardCallback;
         }
 
         internal void Start()
         {
-            IntPtr module = Native.GetModuleHandle(null);
-            mouseHook = Native.SetWindowsHookEx(14, mouseCallback, module, 0);
-            if (mouseHook == IntPtr.Zero)
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot listen for menu clicks.");
-            keyboardHook = Native.SetWindowsHookEx(13, keyboardCallback, module, 0);
-            if (keyboardHook == IntPtr.Zero)
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot listen for Escape and action numbers.");
+            if (disposed) throw new ObjectDisposedException("MenuInputCapture");
+            if (worker != null) throw new InvalidOperationException("Menu capture is already running.");
+            worker = new HookThread(delegate
+            {
+                IntPtr module = Native.GetModuleHandle(null);
+                mouseHook = Native.SetWindowsHookEx(14, mouseCallback, module, 0);
+                if (mouseHook == IntPtr.Zero)
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot listen for menu clicks.");
+                keyboardHook = Native.SetWindowsHookEx(13, keyboardCallback, module, 0);
+                if (keyboardHook == IntPtr.Zero)
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot listen for Escape and action numbers.");
+            }, ReleaseHooks);
         }
 
         private IntPtr MouseCallback(int code, IntPtr message, IntPtr data)
@@ -527,24 +567,36 @@ namespace MD301Plus
             return Native.CallNextHookEx(mouseHook, code, message, data);
         }
 
-        // Windows skips low-level hooks for input that arrives while this thread is busy for longer than
-        // LowLevelHooksTimeout (about 300 ms); those clicks reach the ring window itself instead.
+        // Keep a window-message fallback for input that did not pass through the low-level hook.
         internal void WindowMouse(int kind, Point screenPoint)
         {
             if (completed) return;
-            if (kind != 0x0200) Bypassed = true;
+            if (kind != 0x0200) bypassed = true;
             Mouse(kind, screenPoint, 0, false);
         }
 
-        internal bool Bypassed { get; private set; }
+        internal bool Bypassed { get { return bypassed; } }
 
         // Returns true when the low-level hook should swallow the event.
         internal bool Mouse(int kind, Point point, uint mouseData, bool fromHook)
         {
+            lock (stateLock)
+            {
+                if (completed || disposed) return false;
+                return ProcessMouse(kind, point, mouseData, fromHook);
+            }
+        }
+
+        private bool ProcessMouse(int kind, Point point, uint mouseData, bool fromHook)
+        {
             int index = hitTest(point);
             if (kind == 0x0200)
             {
-                hover(index);
+                if (lastHovered != index)
+                {
+                    lastHovered = index;
+                    Dispatch(hover, index);
+                }
             }
             else if (kind == 0x0201 || kind == 0x0204)
             {
@@ -572,15 +624,22 @@ namespace MD301Plus
 
         private IntPtr KeyboardCallback(int code, IntPtr message, IntPtr data)
         {
-            if (code < 0 || completed)
+            if (code < 0 || completed || disposed)
                 return Native.CallNextHookEx(keyboardHook, code, message, data);
             Native.KeyboardHookData input = (Native.KeyboardHookData)Marshal.PtrToStructure(data, typeof(Native.KeyboardHookData));
-            int key = (int)input.VirtualKey;
-            int kind = message.ToInt32();
+            lock (stateLock)
+            {
+                if (!completed && !disposed && Keyboard(message.ToInt32(), (int)input.VirtualKey, Native.CurrentModifiers()))
+                    return new IntPtr(1);
+            }
+            return Native.CallNextHookEx(keyboardHook, code, message, data);
+        }
+
+        private bool Keyboard(int kind, int key, uint modifiers)
+        {
             bool down = kind == 0x0100 || kind == 0x0104;
             bool up = kind == 0x0101 || kind == 0x0105;
-            if (IsTriggerEvent(trigger.Keyboard, key, Native.CurrentModifiers()))
-                return Native.CallNextHookEx(keyboardHook, code, message, data);
+            if (IsTriggerEvent(trigger.Keyboard, key, modifiers)) return false;
             int index = key >= 0x31 && key <= 0x38 ? key - 0x31 :
                 (key >= 0x61 && key <= 0x68 ? key - 0x61 : -1);
             if (index >= 0 || key == 0x1B)
@@ -589,11 +648,11 @@ namespace MD301Plus
                     pendingKey = key;
                 if (up && pendingKey == key)
                     Finish(index);
-                return new IntPtr(1);
+                return true;
             }
             if (down && !IsModifier(key))
                 Finish(-1);
-            return Native.CallNextHookEx(keyboardHook, code, message, data);
+            return false;
         }
 
         private static bool IsModifier(int key)
@@ -611,16 +670,37 @@ namespace MD301Plus
         {
             if (completed) return;
             completed = true;
-            complete(index);
+            Dispatch(complete, index);
         }
 
-        public void Dispose()
+        private void Dispatch(Action<int> action, int index)
+        {
+            if (Thread.CurrentThread.ManagedThreadId == ownerThread)
+            {
+                action(index);
+                return;
+            }
+            try { context.Post(delegate { if (!disposed) action(index); }, null); }
+            catch (InvalidOperationException error)
+            {
+                if (!disposed) ThreadPool.QueueUserWorkItem(delegate { AppLog.Error("Dispatching menu input", error); });
+            }
+        }
+
+        private void ReleaseHooks()
         {
             if (mouseHook != IntPtr.Zero && !Native.UnhookWindowsHookEx(mouseHook))
                 AppLog.Error("Releasing the menu mouse listener", new Win32Exception(Marshal.GetLastWin32Error()));
             if (keyboardHook != IntPtr.Zero && !Native.UnhookWindowsHookEx(keyboardHook))
                 AppLog.Error("Releasing the menu keyboard listener", new Win32Exception(Marshal.GetLastWin32Error()));
             mouseHook = keyboardHook = IntPtr.Zero;
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            if (worker != null) worker.Dispose();
             GC.KeepAlive(mouseCallback);
             GC.KeepAlive(keyboardCallback);
         }
@@ -644,8 +724,13 @@ namespace MD301Plus
 
         internal static void Send(KeyboardShortcut shortcut)
         {
+            Send(shortcut, Native.SendInput);
+        }
+
+        internal static void Send(KeyboardShortcut shortcut, Native.InputSender sender)
+        {
             Native.Input[] inputs = BuildInputs(shortcut);
-            uint sent = Native.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Native.Input)));
+            uint sent = sender((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Native.Input)));
             if (sent == inputs.Length) return;
             int error = Marshal.GetLastWin32Error();
             List<Native.Input> releases = new List<Native.Input>();
@@ -660,7 +745,7 @@ namespace MD301Plus
             }
             string cleanup = "";
             if (releases.Count > 0 &&
-                Native.SendInput((uint)releases.Count, releases.ToArray(), Marshal.SizeOf(typeof(Native.Input))) != releases.Count)
+                sender((uint)releases.Count, releases.ToArray(), Marshal.SizeOf(typeof(Native.Input))) != releases.Count)
                 cleanup = " Windows also blocked modifier cleanup; release Ctrl, Alt, Shift and Win manually.";
             throw new Win32Exception(error, "Windows accepted " + sent + " of " + inputs.Length +
                 " shortcut events. Elevated applications and secure desktops can block input." + cleanup);

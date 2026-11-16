@@ -20,8 +20,9 @@ namespace MD301Plus.Tests
 
     internal sealed class BackgroundSettingsPreview : SettingsForm
     {
-        internal BackgroundSettingsPreview(RingSettings settings, Action resume = null, bool paused = false)
-            : base(settings, delegate { }, delegate { }, null, resume, paused) { }
+        internal BackgroundSettingsPreview(RingSettings settings, Action resume = null, bool paused = false,
+            Action<RingSettings> save = null, Action pause = null, Action<string> openLink = null)
+            : base(settings, save ?? delegate { }, delegate { }, pause, resume, paused, openLink) { }
         protected override bool ShowWithoutActivation { get { return true; } }
         protected override CreateParams CreateParams
         {
@@ -49,7 +50,7 @@ namespace MD301Plus.Tests
         }
     }
 
-    internal static class TestRunner
+    internal static partial class TestRunner
     {
         private static int assertions;
 
@@ -84,6 +85,7 @@ namespace MD301Plus.Tests
                 TestVersion();
                 TestSettings(directory);
                 TestDiagnosticLog();
+                TestStability(directory);
                 TestMouseBindings();
                 TestMediaKeys();
                 TestGeometry();
@@ -505,7 +507,7 @@ namespace MD301Plus.Tests
             return new IntPtr((point.Y << 16) | (point.X & 0xFFFF));
         }
 
-        // SendMessage skips low-level hooks, like a click that arrives while the app is busy for 300+ ms.
+        // SendMessage delivers window input directly, without passing through low-level hooks.
         private static void ClickWithoutHook(Form window, Point client)
         {
             SendMessage(window.Handle, 0x0201, new IntPtr(1), ClientPoint(client));
@@ -561,15 +563,15 @@ namespace MD301Plus.Tests
                 reading = MouseBattery.Unknown;
                 monitor.Poll();
                 Pump(50);
-                Check(monitor.Percent == 64 && changes == 1, "A sleeping mouse keeps its last reading");
+                Check(monitor.Percent == 64 && changes == 2, "A sleeping mouse keeps its last reading and reports its state");
                 state = BatteryRead.Missing;
                 monitor.Poll();
-                PumpUntil(delegate { return changes == 2; }, "Unplugging the receiver is reported");
+                PumpUntil(delegate { return changes == 3; }, "Unplugging the receiver is reported");
                 Check(monitor.Percent == MouseBattery.Unknown, "Unplugging the receiver clears the reading");
                 state = BatteryRead.Ok;
                 reading = 50;
                 monitor.Refresh();
-                PumpUntil(delegate { return changes == 3 && monitor.Percent == 50; }, "Opening the ring refreshes the battery in the background");
+                PumpUntil(delegate { return changes == 4 && monitor.Percent == 50; }, "Opening the ring refreshes the battery in the background");
                 reading = 10;
                 monitor.Refresh();
                 Pump(100);

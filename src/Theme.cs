@@ -17,6 +17,15 @@ namespace MD301Plus
         internal static readonly Color Accent = Color.FromArgb(224, 187, 133);
         internal static readonly Color Selection = Color.FromArgb(66, 57, 44);
 
+        internal static void FitToWorkingArea(Form form)
+        {
+            Rectangle area = Screen.FromControl(form).WorkingArea;
+            form.MinimumSize = new Size(Math.Min(form.MinimumSize.Width, area.Width), Math.Min(form.MinimumSize.Height, area.Height));
+            form.Size = new Size(Math.Min(form.Width, area.Width), Math.Min(form.Height, area.Height));
+            form.Location = new Point(Math.Max(area.Left, Math.Min(form.Left, area.Right - form.Width)),
+                Math.Max(area.Top, Math.Min(form.Top, area.Bottom - form.Height)));
+        }
+
         internal static GraphicsPath RoundedRectangle(RectangleF bounds, float radius)
         {
             GraphicsPath path = new GraphicsPath();

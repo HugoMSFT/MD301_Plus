@@ -244,6 +244,7 @@ namespace MD301Plus
     public sealed class SettingsStore
     {
         public string FilePath { get; private set; }
+        public string BackupPath { get { return FilePath + ".bak"; } }
 
         public SettingsStore(string path)
         {
@@ -254,11 +255,21 @@ namespace MD301Plus
         {
             if (!File.Exists(FilePath))
                 return RingSettings.CreateDefault();
-            if (new FileInfo(FilePath).Length > 131072)
+            return Read(FilePath);
+        }
+
+        public RingSettings LoadBackup()
+        {
+            return Read(BackupPath);
+        }
+
+        private static RingSettings Read(string path)
+        {
+            if (new FileInfo(path).Length > 131072)
                 throw new SettingsException("The settings file is larger than 128 KB. It has not been changed.");
             try
             {
-                using (FileStream stream = File.OpenRead(FilePath))
+                using (FileStream stream = File.OpenRead(path))
                 {
                     RingSettings settings = (RingSettings)new DataContractJsonSerializer(typeof(RingSettings)).ReadObject(stream);
                     if (settings == null)
@@ -269,11 +280,34 @@ namespace MD301Plus
             }
             catch (SerializationException ex)
             {
-                throw new SettingsException("Invalid settings JSON. The original file has not been changed: " + FilePath, ex);
+                throw new SettingsException("Invalid settings JSON. The original file has not been changed: " + path, ex);
             }
         }
 
         public void Save(RingSettings settings)
+        {
+            Save(settings, BackupPath);
+        }
+
+        internal string Recover(RingSettings settings)
+        {
+            settings.Validate();
+            RingSettings safe = settings.Copy();
+            safe.Trigger = "None";
+            safe.Button = null;
+            string preserved = null;
+            if (File.Exists(FilePath))
+            {
+                preserved = FilePath + ".damaged-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") +
+                    "-" + Guid.NewGuid().ToString("N") + ".json";
+                File.Copy(FilePath, preserved);
+            }
+            // Recovery must not replace the good backup with the damaged current file.
+            Save(safe, null);
+            return preserved;
+        }
+
+        private void Save(RingSettings settings, string backup)
         {
             settings.Validate();
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
@@ -286,7 +320,7 @@ namespace MD301Plus
                     stream.Flush(true);
                 }
                 if (File.Exists(FilePath))
-                    RetryFileOperation(delegate { File.Replace(temporary, FilePath, null); });
+                    RetryFileOperation(delegate { File.Replace(temporary, FilePath, backup); });
                 else
                     RetryFileOperation(delegate { File.Move(temporary, FilePath); });
             }

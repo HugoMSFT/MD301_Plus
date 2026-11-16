@@ -14,8 +14,9 @@ namespace MD301Plus
         internal static readonly Color BatteryTrack = Color.FromArgb(49, 53, 61);
 
         internal static void Draw(Graphics graphics, RingGeometry geometry, IList<RingAction> actions, int hovered, bool preview,
-            bool editing = false, int battery = MouseBattery.Unknown)
+            bool editing = false, int battery = MouseBattery.Unknown, BatteryReading reading = null)
         {
+            if (reading != null) battery = reading.Percent;
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             float scale = geometry.Scale;
@@ -36,7 +37,7 @@ namespace MD301Plus
                 float margin = 4 * scale;
                 graphics.DrawEllipse(border, margin, margin,
                     geometry.Bounds.Width - 2 * margin - 1, geometry.Bounds.Height - 2 * margin - 1);
-                DrawBattery(graphics, geometry, battery, gaugeText, gaugeIcon);
+                DrawBattery(graphics, geometry, battery, gaugeText, gaugeIcon, reading);
                 graphics.DrawEllipse(orbit, center.X - 154 * scale, center.Y - 154 * scale, 308 * scale, 308 * scale);
                 for (int i = 0; i < RingGeometry.ActionCount; i++)
                 {
@@ -95,8 +96,10 @@ namespace MD301Plus
             return percent >= 0 ? "Mouse battery " + percent + "%." : "Mouse battery level unavailable.";
         }
 
-        private static void DrawBattery(Graphics graphics, RingGeometry geometry, int battery, Font font, Font glyphFont)
+        private static void DrawBattery(Graphics graphics, RingGeometry geometry, int battery, Font font, Font glyphFont,
+            BatteryReading reading)
         {
+            bool current = reading == null || reading.IsCurrent;
             float scale = geometry.Scale;
             PointF center = geometry.Center;
             float radius = RingGeometry.GaugeRadius * scale;
@@ -111,7 +114,7 @@ namespace MD301Plus
             float sweep = BatterySweep(battery);
             if (sweep > 0)
             {
-                using (Pen fill = new Pen(BatteryColor(battery), RingGeometry.GaugeWidth * scale))
+                using (Pen fill = new Pen(current ? BatteryColor(battery) : Theme.Muted, RingGeometry.GaugeWidth * scale))
                 {
                     fill.StartCap = LineCap.Round;
                     fill.EndCap = LineCap.Round;
@@ -119,7 +122,7 @@ namespace MD301Plus
                 }
             }
             bool known = battery >= 0;
-            string text = known ? battery + "%" : "--";
+            string text = reading == null ? (known ? battery + "%" : "--") : reading.Readout;
             // Segoe MDL2 Assets: Battery0-9 are U+E850-E859, Battery10 is U+E83F, BatteryUnknown is U+E996.
             int level = known ? (int)Math.Round(Math.Min(100, battery) / 10.0) : -1;
             string glyph = !known ? "\uE996" : level >= 10 ? "\uE83F" : ((char)(0xE850 + level)).ToString();
@@ -127,10 +130,10 @@ namespace MD301Plus
             float glyphWidth = 19 * scale, spacing = 3 * scale, height = 20 * scale;
             float left = center.X - (glyphWidth + spacing + textSize.Width) / 2;
             float top = center.Y - radius - height / 2;
-            Text(graphics, glyph, glyphFont, known ? BatteryColor(battery) : Theme.Muted,
+            Text(graphics, glyph, glyphFont, known && current ? BatteryColor(battery) : Theme.Muted,
                 new RectangleF(left, top, glyphWidth, height));
             float textCenter = left + glyphWidth + spacing + textSize.Width / 2;
-            Text(graphics, text, font, known ? Theme.Text : Theme.Muted,
+            Text(graphics, text, font, known && current ? Theme.Text : Theme.Muted,
                 new RectangleF(textCenter - textSize.Width / 2 - 8 * scale, top, textSize.Width + 16 * scale, height));
         }
 
@@ -150,12 +153,15 @@ namespace MD301Plus
     internal sealed class RingForm : Form
     {
         private readonly Timer focusTimer;
+        private readonly ToolTip batteryTip = new ToolTip { InitialDelay = 350, AutoPopDelay = 10000 };
         private RingGeometry geometry;
         private RingSettings settings;
         private MenuInputCapture capture;
         private IntPtr source;
         private int hovered = -1;
         private int battery = MouseBattery.Unknown;
+        private BatteryReading batteryStatus;
+        private bool batteryCurrent = true;
         private bool preview;
         private int generation;
         internal event Action<RingAction, IntPtr, bool> ActionChosen;
@@ -165,11 +171,38 @@ namespace MD301Plus
             get { return battery; }
             set
             {
-                if (battery == value) return;
+                if (battery == value && batteryStatus == null) return;
                 battery = value;
+                batteryStatus = null;
+                batteryCurrent = true;
                 AccessibleDescription = Description;
+                batteryTip.SetToolTip(this, "");
                 if (Visible) Invalidate();
             }
+        }
+
+        internal BatteryReading BatteryStatus
+        {
+            get { return batteryStatus; }
+            set
+            {
+                batteryStatus = value;
+                battery = value == null ? MouseBattery.Unknown : value.Percent;
+                batteryCurrent = value == null || value.IsCurrent;
+                AccessibleDescription = Description;
+                if (batteryTip.GetToolTip(this).Length > 0) batteryTip.SetToolTip(this, value == null ? "" : value.Description);
+                if (Visible) Invalidate();
+            }
+        }
+
+        internal void RefreshBatteryStatus()
+        {
+            bool current = batteryStatus == null || batteryStatus.IsCurrent;
+            if (current == batteryCurrent) return;
+            batteryCurrent = current;
+            AccessibleDescription = Description;
+            if (batteryTip.GetToolTip(this).Length > 0) batteryTip.SetToolTip(this, batteryStatus.Description);
+            Invalidate();
         }
 
         private string Description
@@ -177,7 +210,7 @@ namespace MD301Plus
             get
             {
                 return "Eight actions, clockwise from the top. Press 1 through 8 to choose, or Escape to cancel. " +
-                    RingPainter.BatteryDescription(battery);
+                    (batteryStatus == null ? RingPainter.BatteryDescription(battery) : batteryStatus.Description);
             }
         }
 
@@ -195,6 +228,7 @@ namespace MD301Plus
             focusTimer = new Timer { Interval = 50 };
             focusTimer.Tick += delegate
             {
+                RefreshBatteryStatus();
                 if (preview || source == IntPtr.Zero) return;
                 IntPtr foreground = Native.GetForegroundWindow();
                 if (Native.IsWindow(source) && foreground == source) return;
@@ -238,6 +272,12 @@ namespace MD301Plus
             {
                 int position = unchecked((int)message.LParam.ToInt64());
                 Point client = new Point(unchecked((short)(position & 0xFFFF)), unchecked((short)((position >> 16) & 0xFFFF)));
+                if (kind == 0x0200)
+                {
+                    string tip = batteryStatus != null && geometry.IsOnBatteryGauge(PointToScreen(client)) ?
+                        batteryStatus.Description : "";
+                    if (batteryTip.GetToolTip(this) != tip) batteryTip.SetToolTip(this, tip);
+                }
                 capture.WindowMouse(kind, PointToScreen(client));
                 if (kind != 0x0200) return;
             }
@@ -328,7 +368,7 @@ namespace MD301Plus
             {
                 if (!Visible || generation != expectedGeneration) return;
                 if (capture != null && capture.Bypassed)
-                    AppLog.Note("A click on the action ring bypassed the mouse listener (MD301 Plus was busy); the ring handled it directly.");
+                    AppLog.Note("A click on the action ring bypassed the mouse listener; the ring handled it directly.");
                 RingAction action = index >= 0 ? settings.Actions[index] : null;
                 IntPtr target = source;
                 bool wasPreview = preview;
@@ -342,19 +382,18 @@ namespace MD301Plus
         {
             unchecked { generation++; }
             focusTimer.Stop();
+            if (IsHandleCreated) batteryTip.Hide(this);
             Hide();
-            if (capture != null)
-            {
-                capture.Dispose();
-                capture = null;
-            }
+            MenuInputCapture previous = capture;
+            capture = null;
+            if (previous != null) previous.Dispose();
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
             if (geometry != null)
-                RingPainter.Draw(e.Graphics, geometry, settings.Actions, hovered, preview, false, battery);
+                RingPainter.Draw(e.Graphics, geometry, settings.Actions, hovered, preview, false, battery, batteryStatus);
         }
 
         protected override void Dispose(bool disposing)
@@ -363,6 +402,7 @@ namespace MD301Plus
             {
                 CloseMenu();
                 focusTimer.Dispose();
+                batteryTip.Dispose();
             }
             base.Dispose(disposing);
         }

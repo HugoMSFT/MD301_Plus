@@ -8,6 +8,10 @@ analytics, or automatic diagnostic uploads. You do not need an app account.
 The app saves your chosen trigger, action labels, keyboard shortcuts, and launch
 targets in a local `settings.json` file. Launch targets can include app, file,
 and folder paths or website URLs that you enter.
+After a settings change, the previous saved configuration is kept in
+`settings.json.bak`. Explicit recovery also preserves a separate copy of the
+original unreadable file. These copies contain the same kinds of local data
+as the settings file and remain on your PC.
 
 When something fails, the app writes a local `app.log` with the error and
 diagnostic details. These details can include local paths, configured URLs,
@@ -23,7 +27,8 @@ dismiss the ring. It does not record a history of what you type or which apps
 you use.
 
 To show the battery gauge, the app asks a connected MD301 for its battery level.
-The level is shown in the ring only; it is not saved or sent anywhere.
+The level and its last successful update time are shown in the ring and its
+status tooltip only; they are not saved or sent anywhere.
 
 ## Websites and other apps
 

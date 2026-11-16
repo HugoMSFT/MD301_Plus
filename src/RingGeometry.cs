@@ -41,6 +41,12 @@ namespace MD301Plus
                 diameter, diameter);
         }
 
+        internal bool IsOnBatteryGauge(Point point)
+        {
+            double dx = point.X - Bounds.Left - Center.X, dy = point.Y - Bounds.Top - Center.Y;
+            return Math.Abs(Math.Sqrt(dx * dx + dy * dy) - GaugeRadius * Scale) <= 12 * Scale;
+        }
+
         // Pie-menu hit test: every point on the ring outside the hub belongs to the action in that direction,
         // so a click between two bubbles or beside a bubble still selects it instead of silently canceling.
         public int HitTest(Point screenPoint)
